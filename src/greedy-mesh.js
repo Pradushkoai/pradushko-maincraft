@@ -50,6 +50,14 @@ export function buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_
   const transparentNormals = [];
   const transparentUvs = [];
   const transparentIndices = [];
+  const waterPositions = [];
+  const waterNormals = [];
+  const waterUvs = [];
+  const waterIndices = [];
+  const lavaPositions = [];
+  const lavaNormals = [];
+  const lavaUvs = [];
+  const lavaIndices = [];
 
   const startX = chunkX * CHUNK_SIZE;
   const startZ = chunkZ * CHUNK_SIZE;
@@ -193,11 +201,14 @@ export function buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_
           }
 
           const blockDef = BLOCKS[blockId];
-          const isTransparent = blockDef && blockDef.transparent;
-          const targetPos = isTransparent ? transparentPositions : positions;
-          const targetNorm = isTransparent ? transparentNormals : normals;
-          const targetUv = isTransparent ? transparentUvs : uvs;
-          const targetIdx = isTransparent ? transparentIndices : indices;
+          const isWater = blockId === 16;
+          const isLava = blockId === 35;
+          const isTransparent = !isWater && !isLava && blockDef && blockDef.transparent;
+          let targetPos, targetNorm, targetUv, targetIdx;
+          if (isWater) { targetPos = waterPositions; targetNorm = waterNormals; targetUv = waterUvs; targetIdx = waterIndices; }
+          else if (isLava) { targetPos = lavaPositions; targetNorm = lavaNormals; targetUv = lavaUvs; targetIdx = lavaIndices; }
+          else if (isTransparent) { targetPos = transparentPositions; targetNorm = transparentNormals; targetUv = transparentUvs; targetIdx = transparentIndices; }
+          else { targetPos = positions; targetNorm = normals; targetUv = uvs; targetIdx = indices; }
 
           const startIdx = targetPos.length / 3;
           targetPos.push(v0[0], v0[1], v0[2]);
@@ -211,10 +222,18 @@ export function buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_
           targetNorm.push(dir[0], dir[1], dir[2]);
 
           // UV с учётом размеров (растягиваем на весь quad)
-          targetUv.push(uvCoords.u0, uvCoords.v1);
-          targetUv.push(uvCoords.u0, uvCoords.v0);
-          targetUv.push(uvCoords.u1, uvCoords.v1);
-          targetUv.push(uvCoords.u1, uvCoords.v0);
+          // UV: для воды и лавы — вся текстура (0-1), для остальных — из атласа
+          if (isWater || isLava) {
+            targetUv.push(0, 1);
+            targetUv.push(0, 0);
+            targetUv.push(1, 1);
+            targetUv.push(1, 0);
+          } else {
+            targetUv.push(uvCoords.u0, uvCoords.v1);
+            targetUv.push(uvCoords.u0, uvCoords.v0);
+            targetUv.push(uvCoords.u1, uvCoords.v1);
+            targetUv.push(uvCoords.u1, uvCoords.v0);
+          }
 
           targetIdx.push(startIdx, startIdx + 1, startIdx + 2);
           targetIdx.push(startIdx + 2, startIdx + 1, startIdx + 3);
@@ -232,5 +251,13 @@ export function buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_
     transparentNormals: new Float32Array(transparentNormals),
     transparentUvs: new Float32Array(transparentUvs),
     transparentIndices: new Uint32Array(transparentIndices),
+    waterPositions: new Float32Array(waterPositions),
+    waterNormals: new Float32Array(waterNormals),
+    waterUvs: new Float32Array(waterUvs),
+    waterIndices: new Uint32Array(waterIndices),
+    lavaPositions: new Float32Array(lavaPositions),
+    lavaNormals: new Float32Array(lavaNormals),
+    lavaUvs: new Float32Array(lavaUvs),
+    lavaIndices: new Uint32Array(lavaIndices),
   };
 }

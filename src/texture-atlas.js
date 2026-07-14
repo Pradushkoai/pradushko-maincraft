@@ -249,8 +249,49 @@ function drawTexture(ctx, name, ox, oy) {
       break;
     case 'water':
       fillTile(ctx, ox, oy, PALETTE.water);
-      // Волны
-      for (let i = 0; i < 50; i++) {
+      // Волны — диагональные полосы
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = `rgba(90,142,200,${0.4 + Math.random()*0.3})`;
+        const y = i * 4 + Math.floor(Math.random()*2);
+        ctx.fillRect(ox, oy + y, TILE_SIZE, 1);
+      }
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${0.05 + Math.random()*0.15})`;
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 2, 1);
+      }
+      break;
+    case 'water_1':
+      fillTile(ctx, ox, oy, PALETTE.water);
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = `rgba(90,142,200,${0.4 + Math.random()*0.3})`;
+        const y = i * 4 + 2 + Math.floor(Math.random()*2);
+        ctx.fillRect(ox, oy + y, TILE_SIZE, 1);
+      }
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${0.05 + Math.random()*0.15})`;
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 2, 1);
+      }
+      break;
+    case 'water_2':
+      fillTile(ctx, ox, oy, PALETTE.water);
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = `rgba(90,142,200,${0.4 + Math.random()*0.3})`;
+        const y = i * 4 + 1 + Math.floor(Math.random()*2);
+        ctx.fillRect(ox, oy + y, TILE_SIZE, 1);
+      }
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = `rgba(255,255,255,${0.05 + Math.random()*0.15})`;
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 2, 1);
+      }
+      break;
+    case 'water_3':
+      fillTile(ctx, ox, oy, PALETTE.water);
+      for (let i = 0; i < 8; i++) {
+        ctx.fillStyle = `rgba(90,142,200,${0.4 + Math.random()*0.3})`;
+        const y = i * 4 + 3 + Math.floor(Math.random()*2);
+        ctx.fillRect(ox, oy + y, TILE_SIZE, 1);
+      }
+      for (let i = 0; i < 30; i++) {
         ctx.fillStyle = `rgba(255,255,255,${0.05 + Math.random()*0.15})`;
         ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 2, 1);
       }
@@ -477,10 +518,48 @@ function drawTexture(ctx, name, ox, oy) {
       }
       break;
     case 'lava':
+    case 'lava_0':
       fillTile(ctx, ox, oy, PALETTE.lava);
       for (let i = 0; i < 30; i++) {
         ctx.fillStyle = '#' + PALETTE.lava_bright.toString(16).padStart(6, '0');
         ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 2, 2);
+      }
+      for (let i = 0; i < 15; i++) {
+        ctx.fillStyle = '#ffe85e';
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 1, 1);
+      }
+      break;
+    case 'lava_1':
+      fillTile(ctx, ox, oy, PALETTE.lava);
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = '#' + PALETTE.lava_bright.toString(16).padStart(6, '0');
+        const x = (ox + Math.floor(Math.random()*TILE_SIZE) + 4) % TILE_SIZE + ox;
+        ctx.fillRect(x, oy + Math.floor(Math.random()*TILE_SIZE), 2, 2);
+      }
+      for (let i = 0; i < 15; i++) {
+        ctx.fillStyle = '#ffe85e';
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 1, 1);
+      }
+      break;
+    case 'lava_2':
+      fillTile(ctx, ox, oy, PALETTE.lava);
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = '#' + PALETTE.lava_bright.toString(16).padStart(6, '0');
+        const y = (oy + Math.floor(Math.random()*TILE_SIZE) + 4) % TILE_SIZE + oy;
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), y, 2, 2);
+      }
+      for (let i = 0; i < 15; i++) {
+        ctx.fillStyle = '#ffe85e';
+        ctx.fillRect(ox + Math.floor(Math.random()*TILE_SIZE), oy + Math.floor(Math.random()*TILE_SIZE), 1, 1);
+      }
+      break;
+    case 'lava_3':
+      fillTile(ctx, ox, oy, PALETTE.lava);
+      for (let i = 0; i < 30; i++) {
+        ctx.fillStyle = '#' + PALETTE.lava_bright.toString(16).padStart(6, '0');
+        const x = (ox + Math.floor(Math.random()*TILE_SIZE) + 8) % TILE_SIZE + ox;
+        const y = (oy + Math.floor(Math.random()*TILE_SIZE) + 4) % TILE_SIZE + oy;
+        ctx.fillRect(x, y, 2, 2);
       }
       for (let i = 0; i < 15; i++) {
         ctx.fillStyle = '#ffe85e';
@@ -707,7 +786,7 @@ export const BLOCK_TEXTURES = {
   13: ['gold_ore','gold_ore','gold_ore','gold_ore','gold_ore','gold_ore'],
   14: ['diamond_ore','diamond_ore','diamond_ore','diamond_ore','diamond_ore','diamond_ore'],
   15: ['bedrock','bedrock','bedrock','bedrock','bedrock','bedrock'],
-  16: ['water','water','water','water','water','water'],
+  16: ['water_0','water_0','water_0','water_0','water_0','water_0'],
   17: ['crafting_side','crafting_side','crafting_top','crafting_side','crafting_side','crafting_side'],
   18: ['chest','chest','chest','chest','chest','chest'],
   19: ['dark_grass_side','dark_grass_side','dark_grass_top','dirt','dark_grass_side','dark_grass_side'],
@@ -721,7 +800,7 @@ export const BLOCK_TEXTURES = {
   32: ['gold_block','gold_block','gold_block','gold_block','gold_block','gold_block'],
   33: ['diamond_block','diamond_block','diamond_block','diamond_block','diamond_block','diamond_block'],
   34: ['obsidian','obsidian','obsidian','obsidian','obsidian','obsidian'],
-  35: ['lava','lava','lava','lava','lava','lava'],
+  35: ['lava_0','lava_0','lava_0','lava_0','lava_0','lava_0'],
   36: ['jungle_wood_side','jungle_wood_side','jungle_wood_top','jungle_wood_top','jungle_wood_side','jungle_wood_side'],
   37: ['jungle_leaves','jungle_leaves','jungle_leaves','jungle_leaves','jungle_leaves','jungle_leaves'],
   41: ['mud','mud','mud','mud','mud','mud'],
@@ -779,7 +858,9 @@ export function buildAtlas() {
     BLOCK_TEXTURES[id].forEach(t => allTextures.add(t));
   }
   // Добавляем базовые для иконок
-  ['coal_ore','iron_ore','gold_ore','diamond_ore','dirt','sand','snow','water','lava','wood_side','plank','stone','cobble','leaves','glass','brick'].forEach(t => allTextures.add(t));
+  ['coal_ore','iron_ore','gold_ore','diamond_ore','dirt','sand','snow','water','lava','wood_side','plank','stone','cobble','leaves','glass','brick',
+   'water_0','water_1','water_2','water_3','lava_0','lava_1','lava_2','lava_3'
+  ].forEach(t => allTextures.add(t));
 
   // Рисуем каждую текстуру
   let idx = 0;

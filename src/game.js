@@ -1,5 +1,8 @@
 
 import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { buildAtlas, getAtlasTexture, getAtlasMaterial, getTextureUV, getBlockTextures, BLOCK_TEXTURES, ATLAS_SIZE, TILE_SIZE } from './texture-atlas.js';
 import { buildChunkMesh } from './greedy-mesh.js';
 
@@ -366,6 +369,7 @@ const MOBS = {
   troll:{name:'Тролль',hp:40,speed:1.4,hostile:true,color:0x5a6a4a,bodyColor:0x5a6a4a,headColor:0x3a4a2a,size:[1.2,2.3,0.8],headSize:0.6,attackRange:2.0,attackDmg:10,drops:[{item:'iron_ore',min:1,max:2},{item:'bone',min:1,max:3}]},
   harpy:{name:'Гарпия',hp:14,speed:2.8,hostile:true,color:0xa88a5a,bodyColor:0xa88a5a,headColor:0x8a6a3a,size:[0.5,0.8,0.5],headSize:0.4,attackRange:1.8,attackDmg:4,drops:[{item:'feather',min:2,max:4},{item:'bone',min:0,max:1}]},
   fish:{name:'Рыба',hp:3,speed:2.0,hostile:false,color:0xc8a868,bodyColor:0xc8a868,headColor:0xa88848,size:[0.3,0.3,0.6],headSize:0.25,drops:[{item:'meat_raw',min:0,max:1}]},
+  duck:{name:'Утка',hp:5,speed:1.5,hostile:false,color:0xe8e8a0,bodyColor:0xe8e8a0,headColor:0x4a8a2a,size:[0.4,0.4,0.5],headSize:0.3,hasLegs:true,hasBeak:true,hasWings:true,drops:[{item:'feather',min:1,max:2},{item:'meat_raw',min:0,max:1}]},
   shark:{name:'Акула',hp:25,speed:2.8,hostile:true,color:0x5a6a7a,bodyColor:0x5a6a7a,headColor:0x3a4a5a,size:[0.8,0.8,2.0],headSize:0.5,attackRange:1.8,attackDmg:8,drops:[{item:'shark_tooth',min:1,max:3},{item:'meat_raw',min:1,max:2}]},
   squid:{name:'Кальмар',hp:10,speed:1.8,hostile:false,color:0x8a4a8a,bodyColor:0x8a4a8a,headColor:0x6a2a6a,size:[0.6,0.8,0.8],headSize:0.5,drops:[{item:'meat_raw',min:0,max:1}]},
   turtle:{name:'Черепаха',hp:15,speed:0.8,hostile:false,color:0x4a8a4a,bodyColor:0x4a8a4a,headColor:0x3a6a3a,size:[0.8,0.5,1.0],headSize:0.3,drops:[{item:'leather',min:0,max:1},{item:'meat_raw',min:0,max:1}]},
@@ -591,7 +595,47 @@ const world = {
         }
       }
     }
+    // === ОЗЕРО В ЦЕНТРЕ + РЕКА НА ЗАПАД ===
+    this.generateLakeAndRiver(cx, cz);
     this.maybePlaceStructure(cx, cz);
+  },
+  generateLakeAndRiver(cx, cz) {
+    const lakeCX = 128, lakeCZ = 128, lakeR = 18;
+    // Река: от озера (128,128) на запад к океану (x~70)
+    const riverZ = 128;
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+        const wx = cx * CHUNK_SIZE + lx;
+        const wz = cz * CHUNK_SIZE + lz;
+        // Озеро — круг в центре
+        const distLake = Math.sqrt((wx - lakeCX)**2 + (wz - lakeCZ)**2);
+        if (distLake < lakeR) {
+          // Найти поверхность и залить водой
+          for (let y = WORLD_D - 1; y >= 0; y--) {
+            if (this.getBlock(wx, y, wz) > 0) {
+              // Песок под водой
+              this.setBlockRaw(wx, y, wz, 7);
+              for (let wy = y + 1; wy <= 10; wy++) {
+                if (wy < WORLD_D) this.setBlockRaw(wx, wy, wz, 16);
+              }
+              break;
+            }
+          }
+        }
+        // Река — полоса на запад от озера
+        if (wx >= 70 && wx <= 128 && Math.abs(wz - riverZ) < 4) {
+          for (let y = WORLD_D - 1; y >= 0; y--) {
+            if (this.getBlock(wx, y, wz) > 0) {
+              this.setBlockRaw(wx, y, wz, 7);
+              for (let wy = y + 1; wy <= 9; wy++) {
+                if (wy < WORLD_D) this.setBlockRaw(wx, wy, wz, 16);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
   },
   placeTree(x, surfY, z, type) {
     const isSpruce = type === 'spruce' || type === 'spruce_sparse';
@@ -940,10 +984,22 @@ renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.insertBefore(renderer.domElement, document.body.firstChild);
 
+// Bloom post-processing
+let composer = null;
+let bloomPass = null;
+function initBloom() {
+  composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.4, 0.3, 0.85);
+  composer.addPass(bloomPass);
+}
+initBloom();
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (composer) composer.setSize(innerWidth, innerHeight);
 });
 
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -963,6 +1019,94 @@ function ensureAtlasBuilt() {
   if (!atlasBuilt) {
     atlasCanvas = buildAtlas();
     atlasBuilt = true;
+    initAnimatedTextures();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  АНИМИРОВАННЫЕ ТЕКСТУРЫ (вода и лава)
+// ═══════════════════════════════════════════════════════════
+let waterCanvas, waterTexture, waterMaterial;
+let lavaCanvas, lavaTexture, lavaMaterial;
+let animFrame = 0;
+let animTimer = 0;
+
+function initAnimatedTextures() {
+  // Вода — анимированная canvas-текстура
+  waterCanvas = document.createElement('canvas');
+  waterCanvas.width = 32; waterCanvas.height = 32;
+  waterTexture = new THREE.CanvasTexture(waterCanvas);
+  waterTexture.magFilter = THREE.NearestFilter;
+  waterTexture.minFilter = THREE.NearestFilter;
+  waterTexture.colorSpace = THREE.SRGBColorSpace;
+  waterMaterial = new THREE.MeshLambertMaterial({
+    map: waterTexture,
+    transparent: true,
+    opacity: 0.75,
+    alphaTest: 0.1,
+  });
+  
+  // Лава — анимированная canvas-текстура
+  lavaCanvas = document.createElement('canvas');
+  lavaCanvas.width = 32; lavaCanvas.height = 32;
+  lavaTexture = new THREE.CanvasTexture(lavaCanvas);
+  lavaTexture.magFilter = THREE.NearestFilter;
+  lavaTexture.minFilter = THREE.NearestFilter;
+  lavaTexture.colorSpace = THREE.SRGBColorSpace;
+  lavaMaterial = new THREE.MeshLambertMaterial({
+    map: lavaTexture,
+    transparent: true,
+    opacity: 0.95,
+    emissive: 0xff4400,
+    emissiveIntensity: 0.5,
+  });
+  
+  drawWaterFrame(0);
+  drawLavaFrame(0);
+}
+
+function drawWaterFrame(frame) {
+  const ctx = waterCanvas.getContext('2d');
+  ctx.fillStyle = '#3a6ea8';
+  ctx.fillRect(0, 0, 32, 32);
+  // Волны — диагональные полосы, сдвинутые по кадру
+  for (let i = 0; i < 8; i++) {
+    ctx.fillStyle = `rgba(90,142,200,${0.4 + Math.random()*0.3})`;
+    const y = (i * 4 + frame * 2) % 32;
+    ctx.fillRect(0, y, 32, 1);
+  }
+  for (let i = 0; i < 30; i++) {
+    ctx.fillStyle = `rgba(255,255,255,${0.05 + Math.random()*0.15})`;
+    ctx.fillRect(Math.floor(Math.random()*32), Math.floor(Math.random()*32), 2, 1);
+  }
+  waterTexture.needsUpdate = true;
+}
+
+function drawLavaFrame(frame) {
+  const ctx = lavaCanvas.getContext('2d');
+  ctx.fillStyle = '#e85a2a';
+  ctx.fillRect(0, 0, 32, 32);
+  // Пузыри лавы, сдвинутые по кадру
+  for (let i = 0; i < 25; i++) {
+    const x = (Math.floor(Math.random()*32) + frame * 3) % 32;
+    const y = (Math.floor(Math.random()*32) + frame * 2) % 32;
+    ctx.fillStyle = '#ffa550';
+    ctx.fillRect(x, y, 2, 2);
+  }
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = '#ffe85e';
+    ctx.fillRect(Math.floor(Math.random()*32), Math.floor(Math.random()*32), 1, 1);
+  }
+  lavaTexture.needsUpdate = true;
+}
+
+function updateAnimatedTextures(dt) {
+  animTimer += dt;
+  if (animTimer > 0.25) { // 4 кадра в секунду
+    animTimer = 0;
+    animFrame = (animFrame + 1) % 4;
+    drawWaterFrame(animFrame);
+    drawLavaFrame(animFrame);
   }
 }
 
@@ -974,7 +1118,6 @@ function buildChunkGreedyMesh(chunkX, chunkZ) {
   ensureAtlasBuilt();
   
   const meshData = buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_D);
-  
   const meshes = [];
   
   // Основной mesh (непрозрачные блоки)
@@ -985,14 +1128,12 @@ function buildChunkGreedyMesh(chunkX, chunkZ) {
     geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.uvs, 2));
     geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
     geometry.computeBoundingSphere();
-    
-    const material = getAtlasMaterial(false);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, getAtlasMaterial(false));
     mesh.frustumCulled = true;
     meshes.push(mesh);
   }
   
-  // Прозрачный mesh (вода, стекло, листва)
+  // Прозрачный mesh (стекло, листва)
   if (meshData.transparentPositions.length > 0) {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(meshData.transparentPositions, 3));
@@ -1000,9 +1141,33 @@ function buildChunkGreedyMesh(chunkX, chunkZ) {
     geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.transparentUvs, 2));
     geometry.setIndex(new THREE.BufferAttribute(meshData.transparentIndices, 1));
     geometry.computeBoundingSphere();
-    
-    const material = getAtlasMaterial(true);
-    const mesh = new THREE.Mesh(geometry, material);
+    const mesh = new THREE.Mesh(geometry, getAtlasMaterial(true));
+    mesh.frustumCulled = true;
+    meshes.push(mesh);
+  }
+  
+  // Water mesh (анимированная текстура)
+  if (meshData.waterPositions.length > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(meshData.waterPositions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.waterNormals, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.waterUvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(meshData.waterIndices, 1));
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, waterMaterial);
+    mesh.frustumCulled = true;
+    meshes.push(mesh);
+  }
+  
+  // Lava mesh (анимированная текстура)
+  if (meshData.lavaPositions.length > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(meshData.lavaPositions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.lavaNormals, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.lavaUvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(meshData.lavaIndices, 1));
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geometry, lavaMaterial);
     mesh.frustumCulled = true;
     meshes.push(mesh);
   }
@@ -2220,6 +2385,48 @@ function makeMobMesh(mobType) {
     addBoxToArrays(positions, normals, colors, 0, bh * 0.8, -bd * 0.1, bw * 1.1, bh * 0.4, bd * 0.2, 0x8a5a2a);
   }
   
+  // Клюв (для уток, попугаев и т.д.)
+  if (def.hasBeak) {
+    addBoxToArrays(positions, normals, colors, 0, bh + hs * 0.15, bd * 0.25 + hs / 2 + 0.05, 0.15, 0.08, 0.15, 0xe8a020);
+  }
+  
+  // Крылья (для птиц)
+  if (def.hasWings) {
+    addBoxToArrays(positions, normals, colors, -bw * 0.7, bh * 0.6, 0, 0.1, bh * 0.5, bd * 0.4, def.bodyColor);
+    addBoxToArrays(positions, normals, colors, bw * 0.7, bh * 0.6, 0, 0.1, bh * 0.5, bd * 0.4, def.bodyColor);
+  }
+  
+  // Хобот (для слона)
+  if (def.hasTrunk) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 0.5, bd * 0.4, 0.15, bh * 0.5, 0.15, def.headColor);
+  }
+  
+  // Горб (для верблюда)
+  if (def.hasHump) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 1.1, 0, bw * 0.7, bh * 0.4, bd * 0.3, def.bodyColor);
+  }
+  
+  // Пятна (для жирафа, ягуара, гиены)
+  if (def.hasSpots) {
+    for (let i = 0; i < 5; i++) {
+      addBoxToArrays(positions, normals, colors, 
+        (Math.random()-0.5) * bw, 
+        bh * 0.3 + Math.random() * bh * 0.5, 
+        (Math.random()-0.5) * bd * 0.3, 
+        0.08, 0.08, 0.08, 0x2a1a08);
+    }
+  }
+  
+  // Длинная шея (для жирафа)
+  if (def.hasLongNeck) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 1.5, 0, 0.2, bh * 0.8, 0.2, def.bodyColor);
+  }
+  
+  // Раковина (для черепахи)
+  if (def.hasShell) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 0.8, 0, bw * 1.2, bh * 0.5, bd * 1.0, 0x3a5a2a);
+  }
+  
   // Индексы
   const vertexCount = positions.length / 3;
   for (let i = 0; i < vertexCount; i += 4) {
@@ -2282,6 +2489,31 @@ function spawnInitialMobs() {
       const type = biome.mobTypes[Math.floor(Math.random() * biome.mobTypes.length)];
       spawnMob(type, x + 0.5, surfY, z + 0.5);
     }
+  }
+  // Рыба и утки в озере (центр карты, радиус 18)
+  for (let i = 0; i < 15; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = Math.random() * 16;
+    const x = 128 + Math.floor(Math.cos(angle) * dist);
+    const z = 128 + Math.floor(Math.sin(angle) * dist);
+    // Найти уровень воды
+    let waterY = 0;
+    for (let y = WORLD_D-1; y >= 0; y--) {
+      if (world.getBlock(x, y, z) === 16) { waterY = y; break; }
+    }
+    if (waterY > 0) {
+      spawnMob(Math.random() < 0.6 ? 'fish' : 'duck', x + 0.5, waterY, z + 0.5);
+    }
+  }
+  // Рыба в реке
+  for (let i = 0; i < 10; i++) {
+    const x = 75 + Math.floor(Math.random() * 50);
+    const z = 125 + Math.floor(Math.random() * 6) - 3;
+    let waterY = 0;
+    for (let y = WORLD_D-1; y >= 0; y--) {
+      if (world.getBlock(x, y, z) === 16) { waterY = y; break; }
+    }
+    if (waterY > 0) spawnMob('fish', x + 0.5, waterY, z + 0.5);
   }
   // Боссы — по 2 на биом
   for (const biomeKey in BIOMES) {
@@ -2758,6 +2990,7 @@ function loop(now) {
   if (!paused) {
     updatePlayer(dt);
     updateMobs(dt);
+    updateAnimatedTextures(dt);
     updateFireParticles(dt);
     updateHighlight();
     updateHUD();
@@ -2778,7 +3011,8 @@ function loop(now) {
     }
     maybePlayAmbient(now);
   }
-  renderer.render(scene, camera);
+  if (composer) composer.render();
+  else renderer.render(scene, camera);
   requestAnimationFrame(loop);
 }
 
