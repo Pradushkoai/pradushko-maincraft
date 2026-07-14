@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { buildAtlas, getAtlasTexture, getAtlasMaterial, getTextureUV, getBlockTextures, BLOCK_TEXTURES, ATLAS_SIZE, TILE_SIZE } from './texture-atlas.js';
 import { buildChunkMesh } from './greedy-mesh.js';
+import { PROVINCES, CITIES, PRODUCTIONS, QUEST_TEMPLATES, questState, npcs, getProvinceAt, spawnCityNPCs, getNearbyNPC, updateQuestProgress, tryCompleteQuest, acceptQuest } from './provinces.js';
 
 // ═══════════════════════════════════════════════════════════
 //  КОНСТАНТЫ
@@ -1374,7 +1375,18 @@ addEventListener('keydown', e => {
     player.vel.y = 0;
     flashHint(player.flying ? '✈ Полёт вкл' : '🚶 Полёт выкл');
   }
-  if (e.code === 'KeyR' && !paused) tryPickup();
+  if (e.code === 'KeyR' && !paused) {
+    // R — диалог с NPC или подбор
+    const npc = getNearbyNPC(4);
+    if (npc) openNPCDialog(npc);
+    else tryPickup();
+  }
+  if (e.code === 'KeyQ' && !paused) {
+    if (inQuestJournal) closeQuestJournal();
+    else if (inProduction) closeProduction();
+    else if (currentNPC) closeNPCDialog();
+    else openQuestJournal();
+  }
   if (e.code.startsWith('Digit')) {
     const n = parseInt(e.code.slice(5)) - 1;
     if (n >= 0 && n < 9) { player.selectedSlot = n; updateHotbar(); }
@@ -1406,6 +1418,9 @@ document.addEventListener('mousedown', e => {
   }
   else if (e.button === 2) {
     const sel = player.hotbar[player.selectedSlot];
+    // Проверить производство (ПКМ по кузнице/пекарне/рынку)
+    const target = getTargetBlock();
+    if (target && checkProductionBlock(target)) return;
     if (sel.item && ITEMS[sel.item] && ITEMS[sel.item].type === 'food') eatFood();
     else placeBlock();
   }
@@ -1426,6 +1441,21 @@ document.getElementById('playBtn').addEventListener('click', () => {
   document.getElementById('blocker').style.display = 'none';
   renderer.domElement.requestPointerLock();
 });
+
+// Кнопки диалога NPC
+document.getElementById('npcAcceptBtn').addEventListener('click', () => {
+  if (currentNPC) {
+    acceptQuest(currentNPC);
+    closeNPCDialog();
+  }
+});
+document.getElementById('npcCompleteBtn').addEventListener('click', () => {
+  if (currentNPC) {
+    tryCompleteQuest(currentNPC);
+    closeNPCDialog();
+  }
+});
+document.getElementById('npcCloseBtn').addEventListener('click', closeNPCDialog);
 
 // ═══════════════════════════════════════════════════════════
 //  ФИЗИКА
@@ -2680,6 +2710,12 @@ function attackMob() {
     } else {
       soundMobDeath();
     }
+    // Обновить квесты
+    if (closestMob.def.boss) {
+      updateQuestProgress('kill_boss', closestMob.type, 1);
+    } else {
+      updateQuestProgress('kill', closestMob.type, 1);
+    }
     scene.remove(closestMob.mesh);
     mobs.splice(mobs.indexOf(closestMob), 1);
   }
@@ -2839,6 +2875,281 @@ function renderBigMap() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  СИСТЕМА ПРОВИНЦИЙ, ГОРОДОВ И КВЕСТОВ
+// ═══════════════════════════════════════════════════════════
+
+const npcMeshes = [];
+let currentNPC = null;
+let inQuestJournal = false;
+let inProduction = false;
+let currentProduction = null;
+
+function makeNPCMesh(npcName) {
+  // NPC = простой человечек: тело + голова + ноги
+  const positions = [], normals = [], colors = [], indices = [];
+  const bodyColor = 0x4a6a9a;
+  const headColor = 0xe8b88a;
+  const legColor = 0x3a2a18;
+  
+  // Тело
+  addBoxToArrays(positions, normals, colors, 0, 0.9, 0, 0.5, 0.7, 0.3, bodyColor);
+  // Голова
+  addBoxToArrays(positions, normals, colors, 0, 1.5, 0, 0.4, 0.4, 0.4, headColor);
+  // Ноги
+  addBoxToArrays(positions, normals, colors, -0.15, 0.25, 0, 0.15, 0.5, 0.15, legColor);
+  addBoxToArrays(positions, normals, colors, 0.15, 0.25, 0, 0.15, 0.5, 0.15, legColor);
+  
+  const vc = positions.length / 3;
+  for (let i = 0; i < vc; i += 4) indices.push(i, i+1, i+2, i+2, i+1, i+3);
+  
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geo.setIndex(indices);
+  geo.computeBoundingSphere();
+  
+  const mesh = new THREE.Mesh(geo, mobMaterial);
+  mesh.frustumCulled = true;
+  // Метка над NPC
+  const sprite = makeTextSprite(npcName + (npcName ? ' ❗' : ''));
+  sprite.position.y = 2.2;
+  mesh.add(sprite);
+  return mesh;
+}
+
+function makeTextSprite(text) {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(0, 0, 256, 64);
+  ctx.font = 'bold 24px Courier New';
+  ctx.fillStyle = '#ffd95e';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, 128, 40);
+  const tex = new THREE.CanvasTexture(c);
+  const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(2, 0.5, 1);
+  return sprite;
+}
+
+function spawnAllCityNPCs() {
+  spawnCityNPCs();
+  for (const npc of npcs) {
+    // Найти поверхность
+    let surfY = 1;
+    for (let y = WORLD_D - 1; y >= 0; y--) {
+      const b = world.getBlock(Math.floor(npc.x), y, Math.floor(npc.z));
+      if (b > 0 && BLOCKS[b].solid) { surfY = y + 1; break; }
+    }
+    const mesh = makeNPCMesh(npc.name);
+    mesh.position.set(npc.x, surfY, npc.z);
+    scene.add(mesh);
+    npc.mesh = mesh;
+    npc.surfY = surfY;
+  }
+}
+
+function updateNPCs(dt) {
+  for (const npc of npcs) {
+    if (!npc.mesh) continue;
+    // Лёгкое покачивание (idle animation)
+    npc.mesh.rotation.y += dt * 0.3 * Math.sin(performance.now() * 0.001 + npc.x);
+    // Проверить близость игрока
+    const dx = npc.x - player.pos.x;
+    const dz = npc.z - player.pos.z;
+    const dist = Math.sqrt(dx*dx + dz*dz);
+    if (dist < 5 && npc.hasQuest) {
+      // Подсветить — сделать спрайт ярче
+    }
+  }
+}
+
+// Открыть диалог с NPC
+function openNPCDialog(npc) {
+  currentNPC = npc;
+  const dialog = document.getElementById('npcDialog');
+  document.getElementById('npcName').textContent = npc.name;
+  document.getElementById('npcQuestTitle').textContent = npc.quest.title;
+  document.getElementById('npcQuestDesc').textContent = npc.quest.description;
+  document.getElementById('npcReward').textContent = '🎁 Награда: ' + npc.quest.rewardText;
+  
+  const activeQuest = questState.active.find(q => q.template.id === npc.quest.id);
+  const acceptBtn = document.getElementById('npcAcceptBtn');
+  const completeBtn = document.getElementById('npcCompleteBtn');
+  
+  if (activeQuest && activeQuest.progress >= activeQuest.template.count) {
+    // Квест выполнен — можно сдать
+    acceptBtn.style.display = 'none';
+    completeBtn.style.display = 'inline-block';
+  } else if (activeQuest) {
+    // Квест активен, но не выполнен
+    acceptBtn.style.display = 'none';
+    completeBtn.style.display = 'none';
+    document.getElementById('npcQuestDesc').textContent = 
+      npc.quest.description + ` (Прогресс: ${activeQuest.progress}/${npc.quest.count})`;
+  } else {
+    // Квест доступен
+    acceptBtn.style.display = 'inline-block';
+    completeBtn.style.display = 'none';
+  }
+  
+  dialog.style.display = 'block';
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+function closeNPCDialog() {
+  document.getElementById('npcDialog').style.display = 'none';
+  currentNPC = null;
+}
+
+// Журнал квестов
+function openQuestJournal() {
+  inQuestJournal = true;
+  const journal = document.getElementById('questJournal');
+  const list = document.getElementById('questList');
+  list.innerHTML = '';
+  
+  if (questState.active.length === 0) {
+    list.innerHTML = '<p style="color:#5a2818;text-align:center;">Нет активных квестов. Найди NPC с ❗ в городах.</p>';
+  } else {
+    for (const q of questState.active) {
+      const div = document.createElement('div');
+      div.style.cssText = 'background:#9a9a9a;border:2px solid #555;padding:10px;margin-bottom:8px;';
+      div.innerHTML = `
+        <div style="color:#5a2818;font-weight:bold;font-size:13px;">${q.template.title}</div>
+        <div style="color:#2b2b2b;font-size:12px;margin:4px 0;">${q.template.description}</div>
+        <div style="color:#2a8a2a;font-size:11px;">Награда: ${q.template.rewardText}</div>
+        <div style="color:#2b2b2b;font-size:11px;margin-top:4px;">Прогресс: ${q.progress}/${q.template.count}</div>
+        <div style="background:#555;height:8px;margin-top:4px;border-radius:4px;">
+          <div style="background:#4a8a2a;height:100%;width:${q.progress/q.template.count*100}%;border-radius:4px;"></div>
+        </div>
+      `;
+      list.appendChild(div);
+    }
+  }
+  
+  if (questState.completed.length > 0) {
+    const done = document.createElement('div');
+    done.style.cssText = 'margin-top:12px;padding-top:8px;border-top:2px solid #555;font-size:12px;color:#5a2818;';
+    done.innerHTML = '<b>Завершённые квесты:</b><br>' + questState.completed.map(id => {
+      const t = QUEST_TEMPLATES.find(q => q.id === id);
+      return t ? '✓ ' + t.title : id;
+    }).join('<br>');
+    list.appendChild(done);
+  }
+  
+  journal.style.display = 'block';
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+function closeQuestJournal() {
+  inQuestJournal = false;
+  document.getElementById('questJournal').style.display = 'none';
+}
+
+// Производство
+function openProduction(prodKey) {
+  const prod = PRODUCTIONS[prodKey];
+  if (!prod) return;
+  currentProduction = prodKey;
+  inProduction = true;
+  document.getElementById('prodTitle').textContent = prod.icon + ' ' + prod.name;
+  document.getElementById('prodDesc').textContent = prod.description;
+  
+  const list = document.getElementById('prodRecipes');
+  list.innerHTML = '';
+  
+  prod.recipes.forEach((r, i) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'background:#9a9a9a;border:2px solid #555;padding:8px;margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:8px;';
+    
+    // Иконка результата
+    const icon = document.createElement('canvas');
+    icon.width = 28; icon.height = 28;
+    if (typeof r.output === 'number') {
+      icon.getContext('2d').drawImage(getBlockIcon(r.output), 0, 0, 28, 28);
+    } else {
+      icon.getContext('2d').drawImage(getItemIcon(r.output), 0, 0, 28, 28);
+    }
+    div.appendChild(icon);
+    
+    // Описание
+    const info = document.createElement('div');
+    info.style.flex = '1';
+    const outName = typeof r.output === 'string' ? ITEMS[r.output].name : BLOCKS[r.output].name;
+    const inputStr = Object.entries(r.input).map(([k, v]) => {
+      const name = typeof k === 'number' || !isNaN(k) ? BLOCKS[parseInt(k)]?.name || k : (ITEMS[k]?.name || k);
+      return v + 'x ' + name;
+    }).join(', ');
+    info.innerHTML = `<div style="font-size:12px;color:#2b2b2b;"><b>${outName}</b> x${r.count}</div><div style="font-size:10px;color:#5a2818;">Нужно: ${inputStr}</div>`;
+    div.appendChild(info);
+    
+    // Проверка ресурсов
+    const canMake = Object.entries(r.input).every(([k, v]) => countItem(isNaN(k) ? k : parseInt(k)) >= v);
+    const status = document.createElement('div');
+    status.style.cssText = 'font-size:16px;font-weight:bold;';
+    status.textContent = canMake ? '✓' : '✗';
+    status.style.color = canMake ? '#2a8a2a' : '#aa2a2a';
+    div.appendChild(status);
+    
+    if (canMake) {
+      div.addEventListener('click', () => doProduction(r));
+    } else {
+      div.style.opacity = '0.5';
+    }
+    
+    list.appendChild(div);
+  });
+  
+  document.getElementById('productionUI').style.display = 'block';
+  if (document.exitPointerLock) document.exitPointerLock();
+}
+
+function closeProduction() {
+  inProduction = false;
+  document.getElementById('productionUI').style.display = 'none';
+  currentProduction = null;
+}
+
+function doProduction(recipe) {
+  // Проверить и забрать ресурсы
+  for (const [k, v] of Object.entries(recipe.input)) {
+    const key = isNaN(k) ? k : parseInt(k);
+    if (countItem(key) < v) {
+      flashHint('Недостаточно ресурсов');
+      return;
+    }
+  }
+  for (const [k, v] of Object.entries(recipe.input)) {
+    const key = isNaN(k) ? k : parseInt(k);
+    removeItem(key, v);
+  }
+  // Выдать результат
+  addItemToInventory(recipe.output, recipe.count);
+  const name = typeof recipe.output === 'string' ? ITEMS[recipe.output].name : BLOCKS[recipe.output].name;
+  flashHint(`✓ Создано: ${name} x${recipe.count}`);
+  soundCraft();
+  // Обновить UI
+  openProduction(currentProduction);
+  updateHotbar();
+}
+
+// Проверка производства при клике на блок
+function checkProductionBlock(target) {
+  for (const prodKey in PRODUCTIONS) {
+    const prod = PRODUCTIONS[prodKey];
+    if (target.blockId === prod.blockId) {
+      openProduction(prodKey);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  PARTICLE SYSTEM + LIGHT CULLING (для огня/факелов)
 // ═══════════════════════════════════════════════════════════
 
@@ -2990,6 +3301,7 @@ function loop(now) {
   if (!paused) {
     updatePlayer(dt);
     updateMobs(dt);
+    updateNPCs(dt);
     updateAnimatedTextures(dt);
     updateFireParticles(dt);
     updateHighlight();
@@ -3169,6 +3481,7 @@ function finishLoad() {
   giveStarterItems();
   buildHotbar();
   spawnInitialMobs();
+  spawnAllCityNPCs();
   findSpawn();
   lastPCX = Math.floor(player.pos.x / CHUNK_SIZE);
   lastPCZ = Math.floor(player.pos.z / CHUNK_SIZE);
