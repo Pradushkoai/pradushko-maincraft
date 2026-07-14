@@ -1,12 +1,7 @@
 
 import * as THREE from 'three';
-// Все определения загружаются из CommonJS через require — для Electron-совместимости
-// В браузере это работать не будет, но мы запускаемся в Electron с nodeIntegration
-// ВАЖНО: для работы require в рендере нужно либо preload, либо bundle. 
-// Для простоты — встроим определения прямо сюда через import.
-
-// === ИМПОРТ МОДУЛЕЙ ===
-// (для Electron-режима с contextIsolation=false)
+import { buildAtlas, getAtlasTexture, getAtlasMaterial, getTextureUV, getBlockTextures, BLOCK_TEXTURES, ATLAS_SIZE, TILE_SIZE } from './texture-atlas.js';
+import { buildChunkMesh } from './greedy-mesh.js';
 
 // ═══════════════════════════════════════════════════════════
 //  КОНСТАНТЫ
@@ -851,327 +846,74 @@ scene.add(sun);
 scene.add(new THREE.HemisphereLight(0x87ceeb, 0x6b4423, 0.3));
 
 // ═══════════════════════════════════════════════════════════
-//  ТЕКСТУРЫ
+//  ТЕКСТУРНЫЙ АТЛАС + GREEDY MESHING
 // ═══════════════════════════════════════════════════════════
-function makeTextureCanvas(blockId, face) {
-  const b = BLOCKS[blockId];
-  if (!b) return null;
-  let color;
-  if (face === 'top') color = b.top !== undefined ? b.top : (b.color || 0x888888);
-  else if (face === 'bottom') color = b.bottom !== undefined ? b.bottom : (b.color || 0x888888);
-  else if (face === 'side') color = b.side !== undefined ? b.side : (b.color || 0x888888);
-  else color = b.color || 0x888888;
 
-  // Увеличим разрешение текстуры до 32x32 для более приятного вида
-  const TEX_SIZE = 32;
-  const c = document.createElement('canvas');
-  c.width = TEX_SIZE; c.height = TEX_SIZE;
-  const cx = c.getContext('2d');
-  const r = (color>>16)&0xff, g = (color>>8)&0xff, bl = color&0xff;
-  cx.fillStyle = `rgb(${r},${g},${bl})`;
-  cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-
-  // Многослойный шум для естественной текстуры
-  // Слой 1: мелкий шум (пиксели)
-  for (let i = 0; i < 200; i++) {
-    const v = (Math.random()-0.5)*25;
-    cx.fillStyle = `rgb(${clamp255(r+v)},${clamp255(g+v)},${clamp255(bl+v)})`;
-    cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+// Строим атлас текстур один раз при старте
+let atlasBuilt = false;
+let atlasCanvas = null;
+function ensureAtlasBuilt() {
+  if (!atlasBuilt) {
+    atlasCanvas = buildAtlas();
+    atlasBuilt = true;
   }
-  // Слой 2: средние пятна (2x2 пикселя)
-  for (let i = 0; i < 30; i++) {
-    const v = (Math.random()-0.5)*40;
-    cx.fillStyle = `rgba(${clamp255(r+v)},${clamp255(g+v)},${clamp255(bl+v)},0.6)`;
-    const px = Math.floor(Math.random()*(TEX_SIZE-2));
-    const py = Math.floor(Math.random()*(TEX_SIZE-2));
-    cx.fillRect(px, py, 2, 2);
-  }
-
-  // Особые текстуры для конкретных блоков
-  if (blockId === 1 && face === 'side') {
-    // Трава: зелёный верхний край с «каплями»
-    cx.fillStyle = '#7cba34'; cx.fillRect(0, 0, TEX_SIZE, 8);
-    cx.fillStyle = '#5a8a24';
-    for (let i = 0; i < 20; i++) cx.fillRect(Math.floor(Math.random()*TEX_SIZE), 6+Math.floor(Math.random()*5), 1, 1);
-    // Зелёные пятна на боку
-    for (let i = 0; i < 8; i++) {
-      cx.fillStyle = '#6aaa2a';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*6), 2, 1);
-    }
-  } else if (blockId === 1 && face === 'top') {
-    // Верх травы — более насыщенный, с пятнами
-    cx.fillStyle = '#7cba34'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    for (let i = 0; i < 40; i++) {
-      cx.fillStyle = i%2 ? '#6aaa2a' : '#8cca44';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-  } else if (blockId === 5 && face === 'side') {
-    // Кора дерева — вертикальные полосы
-    for (let i = 0; i < 8; i++) {
-      cx.fillStyle = i%2 ? '#4a2f15' : '#5a3a1a';
-      cx.fillRect(i * 4 + 1, 0, 2, TEX_SIZE);
-    }
-    // Узел
-    cx.fillStyle = '#3a2a10';
-    cx.beginPath(); cx.arc(12, 16, 3, 0, Math.PI*2); cx.fill();
-  } else if (blockId === 5 && (face === 'top' || face === 'bottom')) {
-    // Спил дерева — кольца
-    cx.strokeStyle = '#8b5a2b'; cx.lineWidth = 1.5;
-    for (let rad = 3; rad < 14; rad += 3) { cx.beginPath(); cx.arc(16, 16, rad, 0, Math.PI*2); cx.stroke(); }
-    cx.fillStyle = '#6b4423'; cx.beginPath(); cx.arc(16, 16, 2, 0, Math.PI*2); cx.fill();
-  } else if (blockId === 4) {
-    // Булыжник — неровные камни
-    for (let i = 0; i < 20; i++) {
-      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.25})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-    for (let i = 0; i < 10; i++) {
-      cx.fillStyle = `rgba(255,255,255,${0.1+Math.random()*0.2})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-  } else if (blockId === 3) {
-    // Камень — более выраженные трещины
-    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
-    for (let i = 0; i < 5; i++) {
-      cx.beginPath();
-      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.stroke();
-    }
-  } else if (blockId === 9) {
-    // Стекло — чистая текстура с лёгким оттенком
-    cx.fillStyle = 'rgba(168,216,232,0.3)'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.strokeStyle = 'rgba(255,255,255,0.8)'; cx.lineWidth = 1.5;
-    cx.strokeRect(1, 1, TEX_SIZE-2, TEX_SIZE-2);
-    // Блик
-    cx.fillStyle = 'rgba(255,255,255,0.4)';
-    cx.fillRect(3, 3, 8, 2);
-    cx.fillRect(3, 3, 2, 8);
-  } else if (blockId === 14) {
-    // Алмаз — блёстки
-    for (let i = 0; i < 20; i++) {
-      cx.fillStyle = '#fff';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-    for (let i = 0; i < 8; i++) {
-      cx.fillStyle = '#aef5e8';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-  } else if (blockId === 12 || blockId === 13 || blockId === 11) {
-    // Руда: вкрапления
-    const spotColor = blockId === 13 ? '#ffe85e' : blockId === 12 ? '#e8c898' : '#1a1a1a';
-    for (let i = 0; i < 12; i++) {
-      cx.fillStyle = spotColor;
-      const sx = Math.floor(Math.random()*(TEX_SIZE-4)) + 2;
-      const sy = Math.floor(Math.random()*(TEX_SIZE-4)) + 2;
-      cx.fillRect(sx, sy, 3, 3);
-      // Блик
-      cx.fillStyle = 'rgba(255,255,255,0.5)';
-      cx.fillRect(sx, sy, 1, 1);
-    }
-  } else if (blockId === 10) {
-    // Кирпич — правильная кладка
-    cx.fillStyle = '#5a2818';
-    cx.fillRect(0, 14, TEX_SIZE, 2); cx.fillRect(0, 30, TEX_SIZE, 2);
-    cx.fillRect(14, 0, 2, 16); cx.fillRect(6, 16, 2, 14); cx.fillRect(22, 16, 2, 14);
-  } else if (blockId === 6 || blockId === 22 || blockId === 37) {
-    // Листва — плотная, с просветами
-    for (let i = 0; i < 60; i++) {
-      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.25})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-    for (let i = 0; i < 25; i++) {
-      cx.fillStyle = blockId === 22 ? '#3a7a2a' : '#6aaa3a';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-  } else if (blockId === 8) {
-    // Доски — горизонтальные линии
-    cx.fillStyle = 'rgba(0,0,0,0.3)';
-    cx.fillRect(0, 15, TEX_SIZE, 1); cx.fillRect(0, 31, TEX_SIZE, 1);
-    cx.fillStyle = '#a87a3a'; cx.fillRect(0, 0, TEX_SIZE, 1); cx.fillRect(0, 16, TEX_SIZE, 1);
-    // Текстура дерева
-    for (let i = 0; i < 15; i++) {
-      cx.fillStyle = 'rgba(139,90,43,0.4)';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
-    }
-  } else if (blockId === 15) {
-    // Bedrock — хаотичные тёмные пятна
-    for (let i = 0; i < 40; i++) {
-      cx.fillStyle = `rgba(0,0,0,${0.2+Math.random()*0.4})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-    for (let i = 0; i < 15; i++) {
-      cx.fillStyle = '#555';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-  } else if (blockId === 17) {
-    // Крафтовый стол — тёмная деревянная столешница с сеткой
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.strokeStyle = '#3a2a08'; cx.lineWidth = 1.5;
-    cx.strokeRect(1, 1, 14, 14); cx.strokeRect(17, 1, 14, 14);
-    cx.strokeRect(1, 17, 14, 14); cx.strokeRect(17, 17, 14, 14);
-    if (face === 'side') { cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, TEX_SIZE, 8); }
-  } else if (blockId === 18) {
-    // Сундук — деревянный с металлическими уголками
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.fillStyle = '#a8782a'; cx.fillRect(2, 3, 28, 26);
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 14, TEX_SIZE, 3); cx.fillRect(14, 3, 4, 26);
-    cx.fillStyle = '#ffd700'; cx.fillRect(14, 14, 4, 4); // замок
-  } else if (blockId === 20) {
-    // Мшистый камень
-    for (let i = 0; i < 30; i++) {
-      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.2})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-    for (let i = 0; i < 20; i++) {
-      cx.fillStyle = '#5a7a3a';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-  } else if (blockId === 16) {
-    // Вода — волны
-    for (let i = 0; i < 60; i++) {
-      cx.fillStyle = `rgba(255,255,255,${0.05+Math.random()*0.15})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
-    }
-  } else if (blockId === 25 || blockId === 49) {
-    // Снег — ровный белый с лёгкими кристаллами
-    for (let i = 0; i < 40; i++) {
-      cx.fillStyle = `rgba(200,220,255,${0.3+Math.random()*0.3})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-    for (let i = 0; i < 15; i++) {
-      cx.fillStyle = '#fff';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-  } else if (blockId === 27) {
-    // Кактус — зелёный с шипами
-    cx.fillStyle = '#2a6a2a'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.fillStyle = '#3a8a3a'; cx.fillRect(4, 0, 24, TEX_SIZE);
-    cx.fillStyle = '#5aaa5a'; cx.fillRect(8, 0, 4, TEX_SIZE); cx.fillRect(20, 0, 4, TEX_SIZE);
-    // Шипы
-    for (let i = 0; i < 12; i++) {
-      cx.fillStyle = '#fff';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-  } else if (blockId === 31 || blockId === 32) {
-    // Железный/золотой блок — металлический блеск
-    for (let i = 0; i < 25; i++) {
-      cx.fillStyle = `rgba(255,255,255,${0.2+Math.random()*0.3})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
-    cx.strokeRect(1, 1, TEX_SIZE-2, TEX_SIZE-2);
-  } else if (blockId === 34) {
-    // Обсидиан — тёмный с фиолетовыми прожилками
-    for (let i = 0; i < 25; i++) {
-      cx.fillStyle = `rgba(80,30,80,${0.3+Math.random()*0.3})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-    cx.strokeStyle = 'rgba(150,80,150,0.5)'; cx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      cx.beginPath();
-      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.stroke();
-    }
-  } else if (blockId === 51) {
-    // Стол — деревянная столешница
-    cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.fillStyle = '#6b4423'; cx.fillRect(0, 24, TEX_SIZE, 8);
-    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
-    cx.strokeRect(0, 0, TEX_SIZE, TEX_SIZE);
-  } else if (blockId === 56) {
-    // Печь — каменная с огнём
-    cx.fillStyle = '#777'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.fillStyle = '#555'; cx.fillRect(4, 4, 24, 24);
-    cx.fillStyle = '#ff8a2a'; cx.fillRect(10, 12, 12, 12);
-    cx.fillStyle = '#ffe85e'; cx.fillRect(13, 15, 6, 6);
-  } else if (blockId === 71) {
-    // Магический стол — фиолетовый с символами
-    cx.fillStyle = '#4a1a5a'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
-    cx.fillStyle = '#6a2a8a'; cx.fillRect(4, 4, 24, 24);
-    cx.fillStyle = '#fff';
-    for (let i = 0; i < 8; i++) cx.fillRect(Math.floor(Math.random()*24)+4, Math.floor(Math.random()*24)+4, 1, 1);
-  } else if (blockId === 72) {
-    // Glowstone — светящийся
-    for (let i = 0; i < 30; i++) {
-      cx.fillStyle = `rgba(255,217,94,${0.4+Math.random()*0.4})`;
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
-    }
-    for (let i = 0; i < 15; i++) {
-      cx.fillStyle = '#fff';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-  } else if (blockId === 77 || blockId === 78) {
-    // Мифрил/адамант — кристаллический блеск
-    for (let i = 0; i < 20; i++) {
-      cx.fillStyle = '#fff';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
-    }
-    cx.strokeStyle = 'rgba(255,255,255,0.5)'; cx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      cx.beginPath();
-      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
-      cx.stroke();
-    }
-  } else if (blockId === 7) {
-    // Песок — более приятный, с лёгкой рябью
-    for (let i = 0; i < 15; i++) {
-      cx.fillStyle = 'rgba(180,150,100,0.3)';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
-    }
-  } else if (blockId === 2) {
-    // Земля — с камнями
-    for (let i = 0; i < 12; i++) {
-      cx.fillStyle = 'rgba(60,40,20,0.5)';
-      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
-    }
-  }
-  return c;
 }
 
-function clamp255(v) {
-  return Math.max(0, Math.min(255, Math.floor(v)));
-}
+// Кэш mesh'ей чанков: ключ "cx,cz" → { mesh, transparentMesh, lastBuilt }
+const chunkMeshes = new Map();
 
-function makeMaterial(blockId, face) {
-  const c = makeTextureCanvas(blockId, face);
-  const tex = new THREE.CanvasTexture(c);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const b = BLOCKS[blockId];
-  return new THREE.MeshLambertMaterial({
-    map: tex,
-    transparent: b.transparent || false,
-    opacity: b.transparent ? (blockId === 16 ? 0.7 : 0.85) : 1,
-    alphaTest: 0.1,
-  });
-}
-
-const materials = {};
-for (const id in BLOCKS) {
-  const bid = parseInt(id);
-  if (bid === 0) continue;
-  const b = BLOCKS[bid];
-  if (b.top !== undefined || b.side !== undefined || b.bottom !== undefined) {
-    materials[bid] = [
-      makeMaterial(bid,'side'), makeMaterial(bid,'side'),
-      makeMaterial(bid,'top'),  makeMaterial(bid,'bottom'),
-      makeMaterial(bid,'side'), makeMaterial(bid,'side'),
-    ];
-  } else {
-    const m = makeMaterial(bid, null);
-    materials[bid] = [m, m, m, m, m, m];
+// Greedy meshing для одного чанка
+function buildChunkGreedyMesh(chunkX, chunkZ) {
+  ensureAtlasBuilt();
+  
+  const meshData = buildChunkMesh(world, BLOCKS, chunkX, chunkZ, CHUNK_SIZE, WORLD_D);
+  
+  const meshes = [];
+  
+  // Основной mesh (непрозрачные блоки)
+  if (meshData.positions.length > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(meshData.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.normals, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
+    geometry.computeBoundingSphere();
+    
+    const material = getAtlasMaterial(false);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = true;
+    meshes.push(mesh);
   }
+  
+  // Прозрачный mesh (вода, стекло, листва)
+  if (meshData.transparentPositions.length > 0) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(meshData.transparentPositions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(meshData.transparentNormals, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(meshData.transparentUvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(meshData.transparentIndices, 1));
+    geometry.computeBoundingSphere();
+    
+    const material = getAtlasMaterial(true);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.frustumCulled = true;
+    meshes.push(mesh);
+  }
+  
+  return meshes;
+}
+
+// Получить UV для блока/грани (для иконок в инвентаре)
+function getBlockFaceUV(blockId, faceIdx) {
+  const textures = getBlockTextures(blockId);
+  const name = textures[faceIdx] || textures[2]; // по умолчанию top
+  return getTextureUV(name);
 }
 
 // ═══════════════════════════════════════════════════════════
-//  MESH МИРА
+//  РЕНДЕР МИРА — через greedy meshing по чанкам
 // ═══════════════════════════════════════════════════════════
-const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
-const worldMeshes = {};
+const worldMeshes = {}; // Совместимость со старым кодом (raycaster)
 
 function isBlockVisible(x, y, z) {
   const id = world.getBlock(x, y, z);
@@ -1186,52 +928,80 @@ function isBlockVisible(x, y, z) {
 }
 
 function buildWorldMesh() {
-  // Очищаем старые
+  ensureAtlasBuilt();
+  
+  // Удаляем старые чанк-mesh'ы
+  for (const [key, data] of chunkMeshes) {
+    if (data.meshes) {
+      data.meshes.forEach(m => scene.remove(m));
+    }
+  }
+  chunkMeshes.clear();
+  
+  // Очищаем worldMeshes для raycaster
   for (const id in worldMeshes) {
     scene.remove(worldMeshes[id]);
-    worldMeshes[id].dispose && worldMeshes[id].dispose();
     delete worldMeshes[id];
   }
-  const exposed = {};
-  // Только чанки вокруг игрока
+  
+  // Строим mesh для каждого чанка в радиусе
   const pcx = Math.floor(player.pos.x / CHUNK_SIZE);
   const pcz = Math.floor(player.pos.z / CHUNK_SIZE);
+  const allMeshes = [];
+  
   for (let dcx = -RENDER_DISTANCE; dcx <= RENDER_DISTANCE; dcx++) {
     for (let dcz = -RENDER_DISTANCE; dcz <= RENDER_DISTANCE; dcz++) {
       const cx = pcx + dcx, cz = pcz + dcz;
       if (!world.isGenerated(cx, cz)) world.generateChunk(cx, cz);
-      for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-        for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-          const wx = cx * CHUNK_SIZE + lx;
-          const wz = cz * CHUNK_SIZE + lz;
-          for (let y = 0; y < WORLD_D; y++) {
-            const id = world.getBlock(wx, y, wz);
-            if (id === 0) continue;
-            if (isBlockVisible(wx, y, wz)) {
-              if (!exposed[id]) exposed[id] = [];
-              exposed[id].push([wx, y, wz]);
-            }
-          }
-        }
-      }
+      
+      const meshes = buildChunkGreedyMesh(cx, cz);
+      meshes.forEach(m => {
+        scene.add(m);
+        allMeshes.push(m);
+      });
+      
+      chunkMeshes.set(`${cx},${cz}`, { meshes, lastBuilt: Date.now() });
     }
   }
-  const matrix = new THREE.Matrix4();
-  for (const id in exposed) {
-    const bid = parseInt(id);
-    const list = exposed[id];
-    if (!materials[bid]) continue;
-    const mesh = new THREE.InstancedMesh(blockGeometry, materials[bid], list.length);
-    mesh.frustumCulled = false;
-    mesh.userData.blockId = bid;
-    list.forEach((pos, i) => {
-      matrix.setPosition(pos[0]+0.5, pos[1]+0.5, pos[2]+0.5);
-      mesh.setMatrixAt(i, matrix);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-    scene.add(mesh);
-    worldMeshes[id] = mesh;
+  
+  // Для raycaster: используем все mesh'ы как один массив
+  worldMeshes[0] = { meshes: allMeshes }; // специальный ключ
+  // Совместимость: создаём псевдо-mesh для raycaster
+  // Raycaster будет искать по allMeshes
+}
+
+// Обновить только один чанк (при изменении блока)
+function rebuildChunkAt(cx, cz) {
+  const key = `${cx},${cz}`;
+  const old = chunkMeshes.get(key);
+  if (old && old.meshes) {
+    old.meshes.forEach(m => scene.remove(m));
   }
+  
+  const meshes = buildChunkGreedyMesh(cx, cz);
+  meshes.forEach(m => scene.add(m));
+  chunkMeshes.set(key, { meshes, lastBuilt: Date.now() });
+  
+  // Перестроить и соседние чанки (на границе мог измениться видимость)
+  const neighbors = [[1,0],[-1,0],[0,1],[0,-1]];
+  for (const [dx, dz] of neighbors) {
+    const ncx = cx + dx, ncz = cz + dz;
+    const nkey = `${ncx},${ncz}`;
+    const nold = chunkMeshes.get(nkey);
+    if (nold && nold.meshes) {
+      nold.meshes.forEach(m => scene.remove(m));
+      const nmeshes = buildChunkGreedyMesh(ncx, ncz);
+      nmeshes.forEach(m => scene.add(m));
+      chunkMeshes.set(nkey, { meshes: nmeshes, lastBuilt: Date.now() });
+    }
+  }
+  
+  // Обновить worldMeshes для raycaster
+  const allMeshes = [];
+  for (const [key, data] of chunkMeshes) {
+    if (data.meshes) allMeshes.push(...data.meshes);
+  }
+  worldMeshes[0] = { meshes: allMeshes };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1484,20 +1254,30 @@ raycaster.far = REACH;
 
 function getTargetBlock() {
   raycaster.setFromCamera({x:0, y:0}, camera);
-  const meshes = Object.values(worldMeshes);
-  if (meshes.length === 0) return null;
-  const intersects = raycaster.intersectObjects(meshes);
+  // Собираем все mesh'ы чанков для raycaster
+  const allMeshes = [];
+  for (const [key, data] of chunkMeshes) {
+    if (data.meshes) allMeshes.push(...data.meshes);
+  }
+  if (allMeshes.length === 0) return null;
+  const intersects = raycaster.intersectObjects(allMeshes);
   if (intersects.length === 0) return null;
   const hit = intersects[0];
-  const mesh = hit.object;
-  const matrix = new THREE.Matrix4();
-  mesh.getMatrixAt(hit.instanceId, matrix);
-  const pos = new THREE.Vector3();
-  matrix.decompose(pos, new THREE.Quaternion(), new THREE.Vector3());
+  // Позиция попадания — на поверхности блока
+  const point = hit.point.clone();
+  // Нормаль грани
+  const normal = hit.face ? hit.face.normal.clone() : new THREE.Vector3(0,1,0);
+  // Блок находится «внутри» от точки попадания по нормали
+  const blockPos = point.clone().sub(normal.multiplyScalar(0.5));
+  const bx = Math.floor(blockPos.x + 0.5);
+  const by = Math.floor(blockPos.y + 0.5);
+  const bz = Math.floor(blockPos.z + 0.5);
+  const blockId = world.getBlock(bx, by, bz);
+  if (blockId === 0) return null;
   return {
-    x: Math.floor(pos.x), y: Math.floor(pos.y), z: Math.floor(pos.z),
-    blockId: mesh.userData.blockId,
-    normal: hit.face ? hit.face.normal.clone() : new THREE.Vector3(0,1,0),
+    x: bx, y: by, z: bz,
+    blockId: blockId,
+    normal: normal,
   };
 }
 
@@ -1521,7 +1301,10 @@ function mineBlock() {
     }
   }
   world.setBlock(target.x, target.y, target.z, 0);
-  buildWorldMesh();
+  // Перестроить только затронутый чанк (и соседние)
+  const cx = Math.floor(target.x / CHUNK_SIZE);
+  const cz = Math.floor(target.z / CHUNK_SIZE);
+  rebuildChunkAt(cx, cz);
   updateHotbar();
 }
 
@@ -1556,7 +1339,9 @@ function placeBlock() {
   world.setBlock(nx, ny, nz, sel.block);
   sel.count--;
   if (sel.count <= 0) player.hotbar[player.selectedSlot] = {block:0, item:null, count:0};
-  buildWorldMesh();
+  const pcx = Math.floor(nx / CHUNK_SIZE);
+  const pcz = Math.floor(nz / CHUNK_SIZE);
+  rebuildChunkAt(pcx, pcz);
   updateHotbar();
   soundPlace();
 }
@@ -1694,20 +1479,52 @@ function getItemIcon(itemKey) {
 }
 
 function getBlockIcon(blockId) {
+  ensureAtlasBuilt();
   const c = document.createElement('canvas');
   c.width = 38; c.height = 38;
   const cx = c.getContext('2d');
   cx.imageSmoothingEnabled = false;
   if (blockId === 0) return c;
-  const topTex = makeTextureCanvas(blockId, 'top');
-  const sideTex = makeTextureCanvas(blockId, 'side');
-  cx.save(); cx.translate(19, 12); cx.transform(1, -0.5, 1, 0.5, 0, 0);
-  cx.drawImage(topTex, -8, -8, 16, 16); cx.restore();
-  cx.save(); cx.translate(11, 16); cx.transform(1, 0.5, 0, 1, 0, 0);
-  cx.drawImage(sideTex, 0, 0, 16, 16);
-  cx.fillStyle = 'rgba(0,0,0,0.25)'; cx.fillRect(0, 0, 16, 16); cx.restore();
-  cx.save(); cx.translate(27, 16); cx.transform(1, -0.5, 0, 1, 0, 0);
-  cx.drawImage(sideTex, 0, 0, 16, 16); cx.restore();
+  
+  // Получаем текстуры из атласа
+  const textures = getBlockTextures(blockId);
+  const topName = textures[2]; // top
+  const sideName = textures[0]; // side
+  
+  // Получаем UV координаты из атласа
+  const topUV = getTextureUV(topName);
+  const sideUV = getTextureUV(sideName);
+  
+  // Рисуем иконку из атласа
+  // Верх (ромб)
+  const tileSize = ATLAS_SIZE / (ATLAS_SIZE / TILE_SIZE);
+  cx.save();
+  cx.translate(19, 12);
+  cx.transform(1, -0.5, 1, 0.5, 0, 0);
+  cx.drawImage(atlasCanvas, 
+    topUV.u0 * ATLAS_SIZE, (1 - topUV.v1) * ATLAS_SIZE, 
+    TILE_SIZE, TILE_SIZE, 
+    -8, -8, 16, 16);
+  cx.restore();
+  // Левый бок
+  cx.save();
+  cx.translate(11, 16);
+  cx.transform(1, 0.5, 0, 1, 0, 0);
+  cx.drawImage(atlasCanvas, 
+    sideUV.u0 * ATLAS_SIZE, (1 - sideUV.v1) * ATLAS_SIZE, 
+    TILE_SIZE, TILE_SIZE, 
+    0, 0, 16, 16);
+  cx.fillStyle = 'rgba(0,0,0,0.25)'; cx.fillRect(0, 0, 16, 16);
+  cx.restore();
+  // Правый бок
+  cx.save();
+  cx.translate(27, 16);
+  cx.transform(1, -0.5, 0, 1, 0, 0);
+  cx.drawImage(atlasCanvas, 
+    sideUV.u0 * ATLAS_SIZE, (1 - sideUV.v1) * ATLAS_SIZE, 
+    TILE_SIZE, TILE_SIZE, 
+    0, 0, 16, 16);
+  cx.restore();
   return c;
 }
 
