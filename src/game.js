@@ -267,54 +267,60 @@ const SEED = Math.floor(Math.random() * 1000000);
 const biomeCache = new Map();
 const BIOME_CACHE_SIZE = 100000;
 
+// ═══════════════════════════════════════════════════════════
+//  КАРТА ПО ШАБЛОНУ — предзаданные регионы биомов
+//  Карта 256×256 разделена на крупные зоны:
+//  Центр — равнины с деревней
+//  Север — горы
+//  Юг — пустыня
+//  Восток — лес
+//  Запад — океан
+//  СВ — снежные земли
+//  ЮВ — джунгли
+//  ЮЗ — болото
+//  СЗ — саванна
+// ═══════════════════════════════════════════════════════════
+
 function getBiomeAt(x, z) {
-  // Кэш
   const key = x * 10000 + z;
   if (biomeCache.has(key)) return biomeCache.get(key);
 
-  // КРУПНЫЕ биомы: масштаб 1/128 = биом ~80-100 блоков в диаметре
-  const scale = 1 / 128;
-  const tempScale = 1 / 96;
-
-  // Континентальный шум — где суша, где океан
-  const continent = biomeNoise(x, z, scale, SEED);
-  // Температурный шум — жарко/холодно
-  const temperature = biomeNoise(x + 1000, z - 500, tempScale, SEED + 100);
-  // Влажность
-  const humidity = biomeNoise(x - 500, z + 700, tempScale, SEED + 200);
-
+  const cx = x - 128, cz = z - 128;
   let result;
-  // Океан — глубокие низины континентального шума
-  if (continent < -0.45) {
-    result = BIOMES.OCEAN;
-  } else if (continent < -0.25) {
-    // Побережья — выбираем по температуре
-    if (temperature > 0.3) result = BIOMES.SWAMP;
-    else if (temperature < -0.3) result = BIOMES.SNOW;
-    else result = BIOMES.PLAINS;
-  } else if (continent > 0.55) {
-    // Высокие горы
-    result = BIOMES.MOUNTAINS;
-  } else {
-    // Средняя высота — выбираем по температуре и влажности
-    if (temperature > 0.4) {
-      // Жарко
-      if (humidity < -0.2) result = BIOMES.DESERT;
-      else if (humidity > 0.3) result = BIOMES.JUNGLE;
-      else result = BIOMES.SAVANNA;
-    } else if (temperature < -0.3) {
-      // Холодно
-      if (humidity > 0.2) result = BIOMES.SNOW;
-      else result = BIOMES.PLAINS;
-    } else {
-      // Умеренно
-      if (humidity > 0.2) result = BIOMES.FOREST;
-      else if (humidity < -0.3) result = BIOMES.SAVANNA;
-      else result = BIOMES.PLAINS;
-    }
+
+  // Определяем регион по квадрантам
+  const absX = Math.abs(cx), absZ = Math.abs(cz);
+  const dist = Math.sqrt(cx*cx + cz*cz);
+
+  // Центр (радиус 30) — равнины с деревней
+  if (dist < 30) {
+    result = BIOMES.PLAINS;
+  }
+  // Океан — западная часть (x < 90)
+  else if (cx < -40) {
+    if (cz < -30) result = BIOMES.SAVANNA;      // северо-запад — саванна
+    else if (cz > 30) result = BIOMES.SWAMP;     // юго-запад — болото
+    else result = BIOMES.OCEAN;                   // запад — океан
+  }
+  // Восточная часть (x > 170)
+  else if (cx > 40) {
+    if (cz < -30) result = BIOMES.SNOW;          // северо-восток — снег
+    else if (cz > 30) result = BIOMES.JUNGLE;    // юго-восток — джунгли
+    else result = BIOMES.FOREST;                  // восток — лес
+  }
+  // Северная часть (z < 90)
+  else if (cz < -30) {
+    result = BIOMES.MOUNTAINS;                    // север — горы
+  }
+  // Южная часть (z > 170)
+  else if (cz > 30) {
+    result = BIOMES.DESERT;                       // юг — пустыня
+  }
+  // Остальное — равнины (буферная зона)
+  else {
+    result = BIOMES.PLAINS;
   }
 
-  // Кэшируем (с ограничением размера)
   if (biomeCache.size > BIOME_CACHE_SIZE) biomeCache.clear();
   biomeCache.set(key, result);
   return result;
@@ -479,6 +485,23 @@ const RECIPES = [
   {result:'sand_veil',count:1,pattern:['B B','BBB','   '],keys:{B:'bamboo'}},
   {result:9,count:1,pattern:['S  ','   ','   '],keys:{S:7}},
   {result:10,count:4,pattern:['SS ','SS ','   '],keys:{S:7}},
+  // Стройматериалы
+  {result:65,count:3,pattern:['P  ','P  ','P  '],keys:{P:8}},          // забор
+  {result:66,count:1,pattern:['P P','P P','P P'],keys:{P:8}},          // калитка
+  {result:67,count:1,pattern:['PP ','PP ','PP '],keys:{P:8}},          // дверь
+  {result:68,count:3,pattern:['S S','S S','S S'],keys:{S:'stick'}},    // лестница
+  {result:57,count:1,pattern:['III','I I','III'],keys:{I:'iron_ingot'}}, // наковальня
+  {result:72,count:1,pattern:['C C','CCC','   '],keys:{C:'coal'}},     // glowstone из угля
+  // Шерстяные блоки
+  {result:61,count:1,pattern:['WW ','WW ','   '],keys:{W:'wool'}},     // белый шерстяной блок
+  {result:63,count:1,pattern:['WW ','WW ','   '],keys:{W:'wool'}},     // красный (упрощение)
+  {result:64,count:1,pattern:['WW ','WW ','   '],keys:{W:'wool'}},     // синий (упрощение)
+  // Ковры
+  {result:60,count:3,pattern:['WW ','   ','   '],keys:{W:'wool'}},     // зелёный ковёр
+  // Декор
+  {result:54,count:1,pattern:['G  ','S  ','S  '],keys:{G:'glowstone',S:'stick'}}, // лампа
+  {result:70,count:1,pattern:[' B ',' B ',' B '],keys:{B:4}},           // горшок
+  {result:29,count:1,pattern:['WW ','WW ','   '],keys:{W:'wheat'}},     // сено
 ];
 
 // ═══════════════════════════════════════════════════════════
@@ -624,31 +647,115 @@ const world = {
   buildHouse(cx, cz, type) {
     let surfY = 0;
     for (let y = WORLD_D-1; y >= 0; y--) { if (this.getBlock(cx, y, cz) > 0) { surfY = y + 1; break; } }
-    if (surfY + 5 >= WORLD_D) surfY = WORLD_D - 6;
-    const w = 7, d = 7, h = 4;
-    const x0 = cx - 3, z0 = cz - 3;
+    if (surfY + 6 >= WORLD_D) surfY = WORLD_D - 7;
+
+    const w = 9, d = 9, h = 5;
+    const x0 = cx - 4, z0 = cz - 4;
+    const wallBlock = 5;   // бревно
+    const fillBlock = 8;   // доски
+    const roofBlock = 10;  // кирпич (черепица)
+    const foundBlock = 4;  // булыжник (фундамент)
+    const floorBlock = 8;  // доски (пол)
+
+    // === ФУНДАМЕНТ (1 слой булыжника) ===
+    for (let x = x0 - 1; x < x0 + w + 1; x++) {
+      for (let z = z0 - 1; z < z0 + d + 1; z++) {
+        if (x<0||x>=WORLD_W||z<0||z>=WORLD_H) continue;
+        this.setBlockRaw(x, z, surfY - 1, foundBlock);
+      }
+    }
+
+    // === СТЕНЫ (бревна по углам, доски между) ===
     for (let x = x0; x < x0 + w; x++) {
       for (let z = z0; z < z0 + d; z++) {
         for (let y = surfY; y < surfY + h; y++) {
           if (x<0||x>=WORLD_W||z<0||z>=WORLD_H||y>=WORLD_D) continue;
+          const isCorner = (x === x0 || x === x0+w-1) && (z === z0 || z === z0+d-1);
           const isEdge = (x === x0 || x === x0+w-1 || z === z0 || z === z0+d-1);
-          if (isEdge) {
-            if ((x === x0+1 || x === x0+w-2) && (z === z0+1 || z === z0+d-2) && y === surfY+2) this.setBlockRaw(x, z, y, 9);
-            else this.setBlockRaw(x, z, y, 8);
-          } else this.setBlockRaw(x, z, y, 0);
+
+          if (isCorner) {
+            // Углы — бревна
+            this.setBlockRaw(x, z, y, wallBlock);
+          } else if (isEdge) {
+            // Стены — доски с окнами
+            const isWindowRow = (y === surfY + 2);
+            const isWindowPos = ((x === x0+2 || x === x0+w-3) && (z === z0 || z === z0+d-1)) ||
+                                ((z === z0+2 || z === z0+d-3) && (x === x0 || x === x0+w-1));
+            if (isWindowRow && isWindowPos) {
+              this.setBlockRaw(x, z, y, 9); // стекло
+            } else {
+              this.setBlockRaw(x, z, y, fillBlock);
+            }
+          } else {
+            // Внутри — воздух
+            this.setBlockRaw(x, z, y, 0);
+          }
         }
-        if (surfY + h < WORLD_D) this.setBlockRaw(x, z, surfY + h, 5);
-        this.setBlockRaw(x, z, surfY - 1, 8);
+        // Пол
+        this.setBlockRaw(x, z, surfY - 1, floorBlock);
       }
     }
+
+    // === КРЫША (двускатная из черепицы) ===
+    for (let layer = 0; layer < 3; layer++) {
+      const inset = layer;
+      const roofY = surfY + h + layer;
+      if (roofY >= WORLD_D) break;
+      for (let x = x0 + inset; x < x0 + w - inset; x++) {
+        for (let z = z0 - 1 - inset; z < z0 + d + 1 + inset; z++) {
+          if (x<0||x>=WORLD_W||z<0||z>=WORLD_H) continue;
+          // Свесы крыши по Z
+          const isEdge = (z === z0 - 1 - inset || z === z0 + d + inset);
+          this.setBlockRaw(x, z, roofY, roofBlock);
+        }
+      }
+    }
+    // Конёк крыши
+    if (surfY + h + 3 < WORLD_D) {
+      for (let z = z0; z < z0 + d; z++) {
+        this.setBlockRaw(cx, z, surfY + h + 3, roofBlock);
+      }
+    }
+
+    // === ДВЕРЬ (проём в передней стене) ===
     this.setBlockRaw(cx, z0, surfY, 0);
-    this.setBlockRaw(cx, z0, surfY+1, 0);
-    this.setBlockRaw(cx - 2, surfY, cz - 2, 17);
-    this.structures.push({ type:'crafting', x:cx-2, z:cz-2 });
-    this.setBlockRaw(cx + 2, surfY, cz + 2, 18);
-    this.structures.push({ type:'chest', x:cx+2, y:surfY, z:cz+2, loot:this.randomLoot() });
+    this.setBlockRaw(cx, z0, surfY + 1, 0);
+    // Коврик перед дверью
+    this.setBlockRaw(cx, z0 - 1, surfY - 1, 58);
+
+    // === ИНТЕРЬЕР ===
+    // Крафтовый стол
+    this.setBlockRaw(cx - 3, surfY, cz - 3, 17);
+    this.structures.push({ type:'crafting', x:cx-3, z:cz-3 });
+
+    // Печь
+    this.setBlockRaw(cx + 3, surfY, cz - 3, 56);
+
+    // Сундук с лутом
+    this.setBlockRaw(cx + 3, surfY, cz + 3, 18);
+    this.structures.push({ type:'chest', x:cx+3, y:surfY, z:cz+3, loot:this.randomLoot() });
+
+    // Кровать (2 блока)
+    this.setBlockRaw(cx - 3, surfY, cz + 3, 53);
+    this.setBlockRaw(cx - 3, surfY, cz + 2, 53);
+
+    // Стол и стул
     this.setBlockRaw(cx, surfY, cz, 51);
     this.setBlockRaw(cx, surfY, cz + 1, 52);
+
+    // Книжная полка
+    this.setBlockRaw(cx - 3, surfY, cz, 55);
+
+    // Ковёр
+    this.setBlockRaw(cx + 1, surfY, cz, 59);
+    this.setBlockRaw(cx - 1, surfY, cz, 58);
+
+    // Факелы на стенах
+    this.setBlockRaw(x0, surfY + 3, cz, 24);
+    this.setBlockRaw(x0 + w - 1, surfY + 3, cz, 24);
+    this.setBlockRaw(cx, surfY + 3, z0, 24);
+    this.setBlockRaw(cx, surfY + 3, z0 + d - 1, 24);
+
     this.structures.push({ type:'house', x:cx, z:cz });
   },
   buildDungeon(cx, cz, depth) {
@@ -1750,15 +1857,37 @@ function drawInvSlot(slotEl, slotData) {
 }
 
 function renderEquip() {
+  let totalDmg = 1; // кулак
+  let totalDef = 0;
+
   ['weapon','helmet','chest','boots'].forEach(slot => {
     const el = document.getElementById('eq-' + slot);
     el.innerHTML = '';
+    el.classList.remove('equipped');
+
     if (player.equip[slot]) {
+      const itemKey = player.equip[slot];
+      const it = ITEMS[itemKey];
+      el.classList.add('equipped');
+
+      // Rarity bar
+      if (it.rarity && it.rarity !== 'COMMON') {
+        const bar = document.createElement('div');
+        bar.className = 'rarity-bar';
+        bar.style.background = RARITY[it.rarity].hex;
+        el.appendChild(bar);
+      }
+
       const icon = document.createElement('canvas');
-      icon.width = 38; icon.height = 38;
-      icon.getContext('2d').drawImage(getItemIcon(player.equip[slot]), 0, 0);
+      icon.width = 40; icon.height = 40;
+      icon.getContext('2d').drawImage(getItemIcon(itemKey), 0, 0);
       el.appendChild(icon);
+
+      // Считаем статы
+      if (it.type === 'weapon' && it.dmg) totalDmg = Math.max(totalDmg, it.dmg);
+      if (it.type === 'armor' && it.def) totalDef += it.def;
     }
+
     el.onclick = () => {
       if (player.equip[slot]) {
         if (addItemToInventory(player.equip[slot], 1)) {
@@ -1770,6 +1899,14 @@ function renderEquip() {
       }
     };
   });
+
+  // Обновляем статы
+  const dmgEl = document.getElementById('stat-dmg');
+  const defEl = document.getElementById('stat-def');
+  const hpEl = document.getElementById('stat-hp');
+  if (dmgEl) dmgEl.textContent = totalDmg;
+  if (defEl) defEl.textContent = totalDef;
+  if (hpEl) hpEl.textContent = player.health + '/' + MAX_HEALTH;
 }
 
 function onInvSlotClick(idx, shift) {

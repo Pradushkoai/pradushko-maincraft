@@ -98,10 +98,16 @@
   #inventory .recipe .can { color:#2a8a2a; font-weight:bold; }
 
   /* Экипировка */
-  #equip { display:flex; flex-direction:column; gap:6px; margin-left:16px; }
-  #equip .eqSlot { width:54px; height:54px; background:rgba(139,139,139,0.4); border:2px solid #555; display:flex; align-items:center; justify-content:center; position:relative; cursor:pointer; }
-  #equip .eqSlot canvas { width:38px; height:38px; image-rendering:pixelated; }
-  #equip .label { font-size:10px; color:#5a2818; text-align:center; margin-top:2px; }
+  #equip { display:flex; flex-direction:column; gap:8px; margin-left:16px; padding:10px; background:#9a9a9a; border:2px solid #555; }
+  #equip .eqSlot { width:58px; height:58px; background:rgba(60,60,60,0.5); border:3px solid #777; display:flex; align-items:center; justify-content:center; position:relative; cursor:pointer; margin:0 auto; }
+  #equip .eqSlot:hover { border-color:#ffd95e; }
+  #equip .eqSlot canvas { width:40px; height:40px; image-rendering:pixelated; }
+  #equip .eqSlot.equipped { border-color:#ffd95e; box-shadow:0 0 8px rgba(255,217,94,0.5); }
+  #equip .label { font-size:9px; color:#5a2818; text-align:center; margin-top:3px; font-weight:bold; }
+  #equip .stats { margin-top:8px; padding-top:8px; border-top:2px solid #555; font-size:11px; color:#2b2b2b; }
+  #equip .stats div { margin:3px 0; }
+  #equip .stats b { color:#5a2818; }
+  #equip .rarity-bar { position:absolute; top:0; left:0; right:0; height:3px; }
 
   /* Лоадер */
   #loading { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); color:#fff; font-size:20px; text-shadow:2px 2px 0 #000; z-index:200; text-align:center; }
@@ -183,10 +189,16 @@
       <div>
         <div class="section-title">Экипировка</div>
         <div id="equip">
+          <div style="text-align:center; color:#5a2818; font-size:12px; font-weight:bold; margin-bottom:4px;">ЭКИПИРОВКА</div>
           <div style="text-align:center"><div class="eqSlot" id="eq-weapon"></div><div class="label">Оружие</div></div>
           <div style="text-align:center"><div class="eqSlot" id="eq-helmet"></div><div class="label">Шлем</div></div>
           <div style="text-align:center"><div class="eqSlot" id="eq-chest"></div><div class="label">Нагрудник</div></div>
           <div style="text-align:center"><div class="eqSlot" id="eq-boots"></div><div class="label">Ботинки</div></div>
+          <div class="stats" id="equipStats">
+            <div>⚔ Урон: <b id="stat-dmg">1</b></div>
+            <div>🛡 Защита: <b id="stat-def">0</b></div>
+            <div>❤ HP: <b id="stat-hp">20/20</b></div>
+          </div>
         </div>
       </div>
     </div>
