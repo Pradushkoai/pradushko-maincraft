@@ -1984,61 +1984,128 @@ function autoFillRecipe(recipe) {
 // ═══════════════════════════════════════════════════════════
 const mobs = [];
 
+// Кэш материалов для мобов (2 материала: непрозрачный и светящийся для боссов)
+const mobMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const mobGlowMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.3 });
+
+// Вспомогательная функция: добавляет box в массивы вершин
+function addBoxToArrays(positions, normals, colors, x, y, z, w, h, d, color) {
+  const r = ((color >> 16) & 0xff) / 255;
+  const g = ((color >> 8) & 0xff) / 255;
+  const b = (color & 0xff) / 255;
+  
+  const x0 = x - w/2, x1 = x + w/2;
+  const y0 = y - h/2, y1 = y + h/2;
+  const z0 = z - d/2, z1 = z + d/2;
+  
+  // 6 граней, 4 вершины каждая
+  const faces = [
+    // +X
+    { n: [1,0,0], v: [[x1,y0,z0],[x1,y1,z0],[x1,y0,z1],[x1,y1,z1]] },
+    // -X
+    { n: [-1,0,0], v: [[x0,y0,z1],[x0,y1,z1],[x0,y0,z0],[x0,y1,z0]] },
+    // +Y
+    { n: [0,1,0], v: [[x0,y1,z1],[x1,y1,z1],[x0,y1,z0],[x1,y1,z0]] },
+    // -Y
+    { n: [0,-1,0], v: [[x0,y0,z0],[x1,y0,z0],[x0,y0,z1],[x1,y0,z1]] },
+    // +Z
+    { n: [0,0,1], v: [[x1,y0,z1],[x1,y1,z1],[x0,y0,z1],[x0,y1,z1]] },
+    // -Z
+    { n: [0,0,-1], v: [[x0,y0,z0],[x0,y1,z0],[x1,y0,z0],[x1,y1,z0]] },
+  ];
+  
+  for (const f of faces) {
+    for (const v of f.v) {
+      positions.push(v[0], v[1], v[2]);
+      normals.push(f.n[0], f.n[1], f.n[2]);
+      colors.push(r, g, b);
+    }
+  }
+}
+
 function makeMobMesh(mobType) {
   const def = MOBS[mobType];
-  const grp = new THREE.Group();
-  const bodyMat = new THREE.MeshLambertMaterial({ color: def.bodyColor });
-  const headMat = new THREE.MeshLambertMaterial({ color: def.headColor });
-
-  // Тело
+  const positions = [];
+  const normals = [];
+  const colors = [];
+  const indices = [];
+  
   const [bw, bh, bd] = def.size;
-  const body = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd * 0.5), bodyMat);
-  body.position.y = bh / 2;
-  grp.add(body);
-
+  
+  // Тело
+  addBoxToArrays(positions, normals, colors, 0, bh / 2, 0, bw, bh, bd * 0.5, def.bodyColor);
+  
   // Голова
   const hs = def.headSize || bw * 0.7;
   if (hs > 0) {
-    const head = new THREE.Mesh(new THREE.BoxGeometry(hs, hs, hs), headMat);
-    head.position.set(0, bh + hs/2 - 0.2, bd * 0.25);
-    grp.add(head);
+    addBoxToArrays(positions, normals, colors, 0, bh + hs/2 - 0.2, bd * 0.25, hs, hs, hs, def.headColor);
     // Глаза
-    const eyeMat = new THREE.MeshBasicMaterial({ color: def.hostile ? 0xff0000 : 0x000000 });
-    const eyeGeo = new THREE.BoxGeometry(0.08, 0.08, 0.05);
-    const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
-    eyeL.position.set(-hs*0.3, bh + hs*0.1, bd * 0.25 + hs/2);
-    const eyeR = eyeL.clone();
-    eyeR.position.x = hs*0.3;
-    grp.add(eyeL); grp.add(eyeR);
+    const eyeColor = def.hostile ? 0xff0000 : 0x000000;
+    addBoxToArrays(positions, normals, colors, -hs*0.3, bh + hs*0.1, bd * 0.25 + hs/2, 0.1, 0.1, 0.06, eyeColor);
+    addBoxToArrays(positions, normals, colors, hs*0.3, bh + hs*0.1, bd * 0.25 + hs/2, 0.1, 0.1, 0.06, eyeColor);
     // Корона для боссов
     if (def.boss) {
-      const crownMat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
-      const crown = new THREE.Mesh(new THREE.BoxGeometry(hs * 1.2, 0.2, hs * 1.2), crownMat);
-      crown.position.set(0, bh + hs * 0.7, bd * 0.25);
-      grp.add(crown);
+      addBoxToArrays(positions, normals, colors, 0, bh + hs * 0.7, bd * 0.25, hs * 1.2, 0.2, hs * 1.2, 0xffd700);
     }
   }
-
+  
   // Ноги
   if (def.hasLegs !== false) {
-    const legMat = new THREE.MeshLambertMaterial({ color: def.headColor });
-    const legGeo = new THREE.BoxGeometry(bw * 0.3, bh * 0.5, bd * 0.3);
-    const legL = new THREE.Mesh(legGeo, legMat);
-    legL.position.set(-bw * 0.25, bh * 0.25, 0);
-    const legR = new THREE.Mesh(legGeo, legMat);
-    legR.position.set(bw * 0.25, bh * 0.25, 0);
-    grp.add(legL); grp.add(legR);
+    addBoxToArrays(positions, normals, colors, -bw * 0.25, bh * 0.25, 0, bw * 0.3, bh * 0.5, bd * 0.3, def.headColor);
+    addBoxToArrays(positions, normals, colors, bw * 0.25, bh * 0.25, 0, bw * 0.3, bh * 0.5, bd * 0.3, def.headColor);
   }
-
-  // Свечение для боссов
+  
+  // Хвост (если есть)
+  if (def.hasTail) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 0.6, -bd * 0.3, 0.15, 0.15, bd * 0.4, def.bodyColor);
+  }
+  
+  // Уши (если есть)
+  if (def.hasEars) {
+    addBoxToArrays(positions, normals, colors, -hs*0.4, bh + hs*0.7, bd * 0.25, 0.15, 0.25, 0.1, def.headColor);
+    addBoxToArrays(positions, normals, colors, hs*0.4, bh + hs*0.7, bd * 0.25, 0.15, 0.25, 0.1, def.headColor);
+  }
+  
+  // Рога (если есть)
+  if (def.hasHorns) {
+    addBoxToArrays(positions, normals, colors, -hs*0.35, bh + hs*0.8, bd * 0.25, 0.1, 0.2, 0.1, 0xeeeedd);
+    addBoxToArrays(positions, normals, colors, hs*0.35, bh + hs*0.8, bd * 0.25, 0.1, 0.2, 0.1, 0xeeeedd);
+  }
+  
+  // Клыки (если есть)
+  if (def.hasTusks) {
+    addBoxToArrays(positions, normals, colors, -hs*0.15, bh - 0.1, bd * 0.25 + hs/2, 0.08, 0.15, 0.08, 0xeeeedd);
+    addBoxToArrays(positions, normals, colors, hs*0.15, bh - 0.1, bd * 0.25 + hs/2, 0.08, 0.15, 0.08, 0xeeeedd);
+  }
+  
+  // Грива (если есть)
+  if (def.hasMane) {
+    addBoxToArrays(positions, normals, colors, 0, bh * 0.8, -bd * 0.1, bw * 1.1, bh * 0.4, bd * 0.2, 0x8a5a2a);
+  }
+  
+  // Индексы
+  const vertexCount = positions.length / 3;
+  for (let i = 0; i < vertexCount; i += 4) {
+    indices.push(i, i + 1, i + 2, i + 2, i + 1, i + 3);
+  }
+  
+  // Создаём geometry
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+  
+  const mesh = new THREE.Mesh(geometry, mobMaterial);
+  mesh.frustumCulled = true;
+  
+  // Для боссов — масштаб + свечение
   if (def.boss) {
-    const glowMat = new THREE.MeshBasicMaterial({ color: def.bodyColor, transparent: true, opacity: 0.3 });
-    const glow = new THREE.Mesh(new THREE.SphereGeometry(Math.max(bw, bh, bd), 8, 8), glowMat);
-    glow.position.y = bh / 2;
-    grp.add(glow);
+    mesh.scale.set(1.5, 1.5, 1.5);
   }
-
-  return grp;
+  
+  return mesh;
 }
 
 function spawnMob(type, x, y, z) {
@@ -2108,11 +2175,33 @@ function spawnInitialMobs() {
 function updateMobs(dt) {
   for (let i = mobs.length - 1; i >= 0; i--) {
     const m = mobs[i];
+    // Hit flash — меняем масштаб материала (так как vertexColors, emissive не работает)
     if (m.hitFlash > 0) {
       m.hitFlash -= dt;
-      m.mesh.children.forEach(c => {
-        if (c.material && c.material.emissive) c.material.emissive.setHex(m.hitFlash > 0 ? 0xff0000 : 0x000000);
-      });
+      // Пропускаем — flash будет через opacity или scale
+    }
+
+    // Mob AI culling — обновляем только мобов в радиусе 40 блоков
+    const distToPlayer = m.pos.distanceTo(player.pos);
+    if (distToPlayer > 50) {
+      // Дальний моб — только гравитация, без AI
+      m.vel.y -= GRAVITY * dt;
+      const newY = m.pos.y + m.vel.y * dt;
+      if (!isSolidAt(m.pos.x, newY, m.pos.z)) {
+        m.pos.y = newY;
+        m.onGround = false;
+      } else {
+        if (m.vel.y < 0) m.pos.y = Math.floor(newY) + 1;
+        m.vel.y = 0;
+        m.onGround = true;
+      }
+      if (m.pos.y < -5) {
+        scene.remove(m.mesh);
+        mobs.splice(i, 1);
+        continue;
+      }
+      m.mesh.position.copy(m.pos);
+      continue;
     }
 
     m.wanderTimer -= dt;
@@ -2381,6 +2470,145 @@ function renderBigMap() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  PARTICLE SYSTEM + LIGHT CULLING (для огня/факелов)
+// ═══════════════════════════════════════════════════════════
+
+// Particle pool — фиксированный набор частиц огня
+const MAX_FIRE_PARTICLES = 200;
+const fireParticles = [];
+let fireParticleGeo = null;
+let fireParticleMesh = null;
+const fireParticlePositions = new Float32Array(MAX_FIRE_PARTICLES * 3);
+const fireParticleColors = new Float32Array(MAX_FIRE_PARTICLES * 3);
+const fireParticleData = []; // {x,y,z, vx,vy,vz, life, maxLife}
+
+function initFireParticles() {
+  for (let i = 0; i < MAX_FIRE_PARTICLES; i++) {
+    fireParticleData.push({ x:0, y:0, z:0, vx:0, vy:0, vz:0, life:0, maxLife:1, active:false });
+    fireParticlePositions[i*3] = 0;
+    fireParticlePositions[i*3+1] = -100; // скрыть
+    fireParticlePositions[i*3+2] = 0;
+  }
+  fireParticleGeo = new THREE.BufferGeometry();
+  fireParticleGeo.setAttribute('position', new THREE.BufferAttribute(fireParticlePositions, 3));
+  fireParticleGeo.setAttribute('color', new THREE.BufferAttribute(fireParticleColors, 3));
+  const mat = new THREE.PointsMaterial({ size: 0.3, vertexColors: true, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false });
+  fireParticleMesh = new THREE.Points(fireParticleGeo, mat);
+  fireParticleMesh.frustumCulled = false;
+  scene.add(fireParticleMesh);
+}
+
+// Кэш источников света факелов
+const torchLights = [];
+const MAX_TORCH_LIGHTS = 8;
+
+// Найти ближайшие факелы и создать для них PointLight
+function updateTorchLights() {
+  // Найти все блоки-факелы в радиусе 15 блоков
+  const px = Math.floor(player.pos.x), py = Math.floor(player.pos.y), pz = Math.floor(player.pos.z);
+  const candidates = [];
+  for (let dx = -10; dx <= 10; dx++) {
+    for (let dy = -5; dy <= 5; dy++) {
+      for (let dz = -10; dz <= 10; dz++) {
+        const b = world.getBlock(px+dx, py+dy, pz+dz);
+        if (b === 24) { // факел
+          const d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          candidates.push({ x: px+dx+0.5, y: py+dy+0.8, z: pz+dz+0.5, dist: d });
+        }
+      }
+    }
+  }
+  candidates.sort((a, b) => a.dist - b.dist);
+  
+  // Обновляем источники света
+  for (let i = 0; i < MAX_TORCH_LIGHTS; i++) {
+    if (i < candidates.length) {
+      if (!torchLights[i]) {
+        torchLights[i] = new THREE.PointLight(0xff8800, 1.2, 8);
+        scene.add(torchLights[i]);
+      }
+      torchLights[i].position.set(candidates[i].x, candidates[i].y, candidates[i].z);
+      torchLights[i].visible = true;
+    } else if (torchLights[i]) {
+      torchLights[i].visible = false;
+    }
+  }
+}
+
+// Спавн частиц огня для факелов в радиусе
+function updateFireParticles(dt) {
+  const px = player.pos.x, py = player.pos.y, pz = player.pos.z;
+  
+  // Найти факелы в радиусе 12
+  const torches = [];
+  for (let dx = -8; dx <= 8; dx++) {
+    for (let dy = -4; dy <= 4; dy++) {
+      for (let dz = -8; dz <= 8; dz++) {
+        const b = world.getBlock(Math.floor(px)+dx, Math.floor(py)+dy, Math.floor(pz)+dz);
+        if (b === 24) {
+          torches.push({ x: Math.floor(px)+dx+0.5, y: Math.floor(py)+dy+0.8, z: Math.floor(pz)+dz+0.5 });
+        }
+      }
+    }
+  }
+  
+  // Спавн новых частиц
+  for (const t of torches) {
+    if (Math.random() < 0.3) {
+      // Найти свободную частицу
+      for (let i = 0; i < MAX_FIRE_PARTICLES; i++) {
+        if (!fireParticleData[i].active) {
+          fireParticleData[i].x = t.x + (Math.random()-0.5) * 0.2;
+          fireParticleData[i].y = t.y;
+          fireParticleData[i].z = t.z + (Math.random()-0.5) * 0.2;
+          fireParticleData[i].vx = (Math.random()-0.5) * 0.5;
+          fireParticleData[i].vy = 1 + Math.random() * 1.5;
+          fireParticleData[i].vz = (Math.random()-0.5) * 0.5;
+          fireParticleData[i].life = 0;
+          fireParticleData[i].maxLife = 0.5 + Math.random() * 0.5;
+          fireParticleData[i].active = true;
+          break;
+        }
+      }
+    }
+  }
+  
+  // Обновление частиц
+  for (let i = 0; i < MAX_FIRE_PARTICLES; i++) {
+    const p = fireParticleData[i];
+    if (!p.active) {
+      fireParticlePositions[i*3+1] = -100;
+      continue;
+    }
+    p.life += dt;
+    if (p.life >= p.maxLife) {
+      p.active = false;
+      fireParticlePositions[i*3+1] = -100;
+      continue;
+    }
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.z += p.vz * dt;
+    p.vy *= 0.95; // замедление
+    
+    fireParticlePositions[i*3] = p.x;
+    fireParticlePositions[i*3+1] = p.y;
+    fireParticlePositions[i*3+2] = p.z;
+    
+    // Цвет: оранжевый → жёлтый → красный (затухание)
+    const t = p.life / p.maxLife;
+    fireParticleColors[i*3] = 1.0; // R
+    fireParticleColors[i*3+1] = 0.6 - t * 0.6; // G
+    fireParticleColors[i*3+2] = 0.1; // B
+  }
+  
+  if (fireParticleGeo) {
+    fireParticleGeo.attributes.position.needsUpdate = true;
+    fireParticleGeo.attributes.color.needsUpdate = true;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  ГЛАВНЫЙ ЦИКЛ
 // ═══════════════════════════════════════════════════════════
 let lastTime = performance.now();
@@ -2393,10 +2621,13 @@ function loop(now) {
   if (!paused) {
     updatePlayer(dt);
     updateMobs(dt);
+    updateFireParticles(dt);
     updateHighlight();
     updateHUD();
     minimapTimer += dt;
     if (minimapTimer > 0.2) { renderMinimap(); minimapTimer = 0; }
+    // Свет факелов — обновляем реже (каждые 0.5 сек)
+    if (minimapTimer > 0.1) updateTorchLights();
     // Перестройка mesh при движении игрока в новый чанк
     meshRebuildTimer += dt;
     if (meshRebuildTimer > 0.5) {
@@ -2563,6 +2794,7 @@ function start() {
 
 function finishLoad() {
   buildWorldMesh();
+  initFireParticles();
   giveStarterItems();
   buildHotbar();
   spawnInitialMobs();
