@@ -1,0 +1,59 @@
+{
+  "name": "pradushko-maincraft",
+  "version": "1.0.0",
+  "description": "3D Minecraft-подобная игра на Electron с биомами, мобами, боссами и крафтом",
+  "main": "main.js",
+  "author": "Pradushkoai",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.pradushko.maincraft",
+    "productName": "PradushkoMaincraft",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pradushko Maincraft"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}
