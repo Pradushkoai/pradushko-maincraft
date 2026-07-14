@@ -13,10 +13,20 @@ import * as THREE from 'three';
 // ═══════════════════════════════════════════════════════════
 const WORLD_W = 256, WORLD_H = 256, WORLD_D = 64;
 const CHUNK_SIZE = 16;
-const RENDER_DISTANCE = 4; // чанков вокруг игрока (64 блока радиус)
+const RENDER_DISTANCE = 6; // чанков вокруг игрока (96 блоков радиус)
 const REACH = 6, GRAVITY = 28, JUMP_V = 9, MOVE_SPEED = 5, FLY_SPEED = 12;
 const PLAYER_W = 0.6, PLAYER_H = 1.8;
 const MAX_HEALTH = 20, MAX_FOOD = 20, MAX_MANA = 100;
+
+// Шумовая функция (упрощённый 2D шум на основе синусов)
+// Делает биомы КРУПНЫМИ и плавными
+function biomeNoise(x, z, scale, seed = 0) {
+  // Несколько октав шума для естественных границ
+  const n1 = Math.sin((x + seed) * scale) * Math.cos((z + seed * 1.3) * scale);
+  const n2 = Math.sin((x + seed * 2) * scale * 0.5) * Math.cos((z + seed * 1.7) * scale * 0.5);
+  const n3 = Math.sin((x - z + seed) * scale * 0.25) * 0.5;
+  return n1 * 0.5 + n2 * 0.35 + n3 * 0.15;
+}
 
 // ═══════════════════════════════════════════════════════════
 //  БЛОКИ (полная копия из blocks.js)
@@ -245,28 +255,74 @@ const ITEMS = {
 //  BIOMES
 // ═══════════════════════════════════════════════════════════
 const BIOMES = {
-  PLAINS:{id:0,name:'Равнины',color:0x7cba34,mapColor:'#7cba34',surfaceBlock:1,subsurfaceBlock:2,heightBase:7,heightVariation:1.5,treeChance:0.04,treeType:'oak',flowerChance:0.05,mobTypes:['cow','sheep','pig','horse','rabbit'],bossType:'golem_forest'},
-  FOREST:{id:1,name:'Лес',color:0x3a6a1a,mapColor:'#3a6a1a',surfaceBlock:1,subsurfaceBlock:2,heightBase:8,heightVariation:2,treeChance:0.18,treeType:'oak_dense',flowerChance:0.02,mobTypes:['wolf','bear','fox','deer','boar'],bossType:'golem_forest'},
-  SWAMP:{id:2,name:'Болото',color:0x4a5a24,mapColor:'#4a5a24',surfaceBlock:19,subsurfaceBlock:41,heightBase:5,heightVariation:0.8,treeChance:0.10,treeType:'swamp_willow',waterChance:0.20,mobTypes:['witch','frog','snake','slime','mosquito'],bossType:'swamp_hydra'},
-  DESERT:{id:3,name:'Пустыня',color:0xe6d29a,mapColor:'#e6d29a',surfaceBlock:7,subsurfaceBlock:7,heightBase:7,heightVariation:1.2,treeChance:0.01,treeType:'cactus',cactusChance:0.05,mobTypes:['scorpion','snake_desert','camel','spider_desert','mummy'],bossType:'sand_worm'},
-  SNOW:{id:4,name:'Снежные земли',color:0xf0f0f8,mapColor:'#f0f0f8',surfaceBlock:25,subsurfaceBlock:2,heightBase:8,heightVariation:1.8,treeChance:0.10,treeType:'spruce',iceChance:0.05,mobTypes:['polar_bear','wolf_snow','penguin','fox_snow','yeti'],bossType:'ice_king'},
-  JUNGLE:{id:5,name:'Джунгли',color:0x2a5a1a,mapColor:'#2a5a1a',surfaceBlock:1,subsurfaceBlock:2,heightBase:9,heightVariation:2.5,treeChance:0.25,treeType:'jungle',vineChance:0.15,mobTypes:['parrot','jaguar','monkey','snake_jungle','panther'],bossType:'jaguar_king'},
-  MOUNTAINS:{id:6,name:'Горы',color:0x8a8a8a,mapColor:'#8a8a8a',surfaceBlock:3,subsurfaceBlock:3,heightBase:14,heightVariation:5,treeChance:0.03,treeType:'spruce_sparse',mobTypes:['eagle','goat','wolf_mountain','troll','harpy'],bossType:'stone_titan'},
-  OCEAN:{id:7,name:'Океан',color:0x3a6ea8,mapColor:'#3a6ea8',surfaceBlock:16,subsurfaceBlock:7,heightBase:3,heightVariation:0.5,waterLevel:6,mobTypes:['fish','shark','squid','turtle','dolphin'],bossType:'sea_serpent'},
-  SAVANNA:{id:8,name:'Саванна',color:0xc8b86a,mapColor:'#c8b86a',surfaceBlock:19,subsurfaceBlock:2,heightBase:7,heightVariation:1.2,treeChance:0.06,treeType:'acacia',mobTypes:['lion','zebra','giraffe','elephant','hyena'],bossType:'lion_king'},
+  PLAINS:{id:0,name:'Равнины',color:0x7cba34,mapColor:'#7cba34',surfaceBlock:1,subsurfaceBlock:2,heightBase:8,heightVariation:1.5,treeChance:0.012,treeType:'oak',flowerChance:0.04,mobTypes:['cow','sheep','pig','horse','rabbit'],bossType:'golem_forest'},
+  FOREST:{id:1,name:'Лес',color:0x3a6a1a,mapColor:'#3a6a1a',surfaceBlock:1,subsurfaceBlock:2,heightBase:9,heightVariation:2.5,treeChance:0.04,treeType:'oak_dense',flowerChance:0.015,mobTypes:['wolf','bear','fox','deer','boar'],bossType:'golem_forest'},
+  SWAMP:{id:2,name:'Болото',color:0x4a5a24,mapColor:'#4a5a24',surfaceBlock:19,subsurfaceBlock:41,heightBase:6,heightVariation:1.0,treeChance:0.025,treeType:'swamp_willow',waterChance:0.20,mobTypes:['witch','frog','snake','slime','mosquito'],bossType:'swamp_hydra'},
+  DESERT:{id:3,name:'Пустыня',color:0xe6d29a,mapColor:'#e6d29a',surfaceBlock:7,subsurfaceBlock:7,heightBase:8,heightVariation:1.5,treeChance:0,treeType:'cactus',cactusChance:0.015,mobTypes:['scorpion','snake_desert','camel','spider_desert','mummy'],bossType:'sand_worm'},
+  SNOW:{id:4,name:'Снежные земли',color:0xf0f0f8,mapColor:'#f0f0f8',surfaceBlock:25,subsurfaceBlock:2,heightBase:9,heightVariation:2.5,treeChance:0.025,treeType:'spruce',iceChance:0.04,mobTypes:['polar_bear','wolf_snow','penguin','fox_snow','yeti'],bossType:'ice_king'},
+  JUNGLE:{id:5,name:'Джунгли',color:0x2a5a1a,mapColor:'#2a5a1a',surfaceBlock:1,subsurfaceBlock:2,heightBase:10,heightVariation:3,treeChance:0.06,treeType:'jungle',vineChance:0.10,mobTypes:['parrot','jaguar','monkey','snake_jungle','panther'],bossType:'jaguar_king'},
+  MOUNTAINS:{id:6,name:'Горы',color:0x8a8a8a,mapColor:'#8a8a8a',surfaceBlock:3,subsurfaceBlock:3,heightBase:18,heightVariation:7,treeChance:0.008,treeType:'spruce_sparse',mobTypes:['eagle','goat','wolf_mountain','troll','harpy'],bossType:'stone_titan'},
+  OCEAN:{id:7,name:'Океан',color:0x3a6ea8,mapColor:'#3a6ea8',surfaceBlock:16,subsurfaceBlock:7,heightBase:4,heightVariation:1.0,waterLevel:8,mobTypes:['fish','shark','squid','turtle','dolphin'],bossType:'sea_serpent'},
+  SAVANNA:{id:8,name:'Саванна',color:0xc8b86a,mapColor:'#c8b86a',surfaceBlock:19,subsurfaceBlock:2,heightBase:8,heightVariation:1.5,treeChance:0.015,treeType:'acacia',mobTypes:['lion','zebra','giraffe','elephant','hyena'],bossType:'lion_king'},
 };
 
 const SEED = Math.floor(Math.random() * 1000000);
+
+// Кэш биомов для производительности
+const biomeCache = new Map();
+const BIOME_CACHE_SIZE = 100000;
+
 function getBiomeAt(x, z) {
-  const nx = x / 80 - 0.5, nz = z / 80 - 0.5;
-  let r = Math.sin(nx*6 + SEED*0.001)*0.4 + Math.cos(nz*5 + SEED*0.002)*0.4 + Math.sin((nx+nz)*4)*0.3 + Math.cos((nx-nz)*7)*0.2;
-  const temp = Math.sin(nx*3.5 + 1.7)*0.5 + Math.cos(nz*4.2 + 2.3)*0.5;
-  if (r < -0.7) return BIOMES.OCEAN;
-  if (r < -0.3) return temp > 0.2 ? BIOMES.SWAMP : BIOMES.SAVANNA;
-  if (r < 0.1) return temp > 0.3 ? BIOMES.DESERT : BIOMES.PLAINS;
-  if (r < 0.4) return temp < -0.3 ? BIOMES.SNOW : BIOMES.FOREST;
-  if (r < 0.7) return temp > 0.2 ? BIOMES.JUNGLE : BIOMES.FOREST;
-  return BIOMES.MOUNTAINS;
+  // Кэш
+  const key = x * 10000 + z;
+  if (biomeCache.has(key)) return biomeCache.get(key);
+
+  // КРУПНЫЕ биомы: масштаб 1/128 = биом ~80-100 блоков в диаметре
+  const scale = 1 / 128;
+  const tempScale = 1 / 96;
+
+  // Континентальный шум — где суша, где океан
+  const continent = biomeNoise(x, z, scale, SEED);
+  // Температурный шум — жарко/холодно
+  const temperature = biomeNoise(x + 1000, z - 500, tempScale, SEED + 100);
+  // Влажность
+  const humidity = biomeNoise(x - 500, z + 700, tempScale, SEED + 200);
+
+  let result;
+  // Океан — глубокие низины континентального шума
+  if (continent < -0.45) {
+    result = BIOMES.OCEAN;
+  } else if (continent < -0.25) {
+    // Побережья — выбираем по температуре
+    if (temperature > 0.3) result = BIOMES.SWAMP;
+    else if (temperature < -0.3) result = BIOMES.SNOW;
+    else result = BIOMES.PLAINS;
+  } else if (continent > 0.55) {
+    // Высокие горы
+    result = BIOMES.MOUNTAINS;
+  } else {
+    // Средняя высота — выбираем по температуре и влажности
+    if (temperature > 0.4) {
+      // Жарко
+      if (humidity < -0.2) result = BIOMES.DESERT;
+      else if (humidity > 0.3) result = BIOMES.JUNGLE;
+      else result = BIOMES.SAVANNA;
+    } else if (temperature < -0.3) {
+      // Холодно
+      if (humidity > 0.2) result = BIOMES.SNOW;
+      else result = BIOMES.PLAINS;
+    } else {
+      // Умеренно
+      if (humidity > 0.2) result = BIOMES.FOREST;
+      else if (humidity < -0.3) result = BIOMES.SAVANNA;
+      else result = BIOMES.PLAINS;
+    }
+  }
+
+  // Кэшируем (с ограничением размера)
+  if (biomeCache.size > BIOME_CACHE_SIZE) biomeCache.clear();
+  biomeCache.set(key, result);
+  return result;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -459,39 +515,61 @@ const world = {
         const wz = cz * CHUNK_SIZE + lz;
         if (wx >= WORLD_W || wz >= WORLD_H) continue;
         const biome = getBiomeAt(wx, wz);
-        let h = biome.heightBase + Math.sin(wx*0.05)*biome.heightVariation + Math.cos(wz*0.04)*biome.heightVariation + Math.sin((wx+wz)*0.03)*(biome.heightVariation*0.5) + (Math.random()-0.5)*0.8;
-        const surface = Math.max(3, Math.min(WORLD_D - 6, Math.floor(h)));
+        // Высота через биом + шум (более плавные холмы)
+        const heightNoise = biomeNoise(wx, wz, 0.08, SEED + 500) * 0.5
+                          + biomeNoise(wx, wz, 0.04, SEED + 600) * 0.5;
+        let h = biome.heightBase + heightNoise * biome.heightVariation * 2 + (Math.random() - 0.5) * 0.4;
+        const surface = Math.max(3, Math.min(WORLD_D - 8, Math.floor(h)));
+
         for (let y = 0; y < WORLD_D; y++) {
           let id = 0;
-          if (y === 0) id = 15;
-          else if (y < surface - 4) {
+          if (y === 0) {
+            id = 15; // bedrock
+          } else if (y < surface - 4) {
+            // Глубокий камень + руда
             id = 3;
             const r = Math.random();
-            if (r < 0.04) id = 11;
-            else if (r < 0.07 && y < surface-6) id = 12;
-            else if (r < 0.085 && y < surface-10) id = 13;
-            else if (r < 0.092 && y < surface-15) id = 14;
-            else if (r < 0.094 && y < surface-20) id = 77;
-            else if (r < 0.095 && y < surface-25) id = 79;
-          } else if (y < surface - 1) id = biome.subsurfaceBlock;
-          else if (y === surface - 1) {
+            const depth = surface - y;
+            if (r < 0.05 && depth > 4) id = 11;       // coal
+            else if (r < 0.085 && depth > 8) id = 12;  // iron
+            else if (r < 0.095 && depth > 14) id = 13; // gold
+            else if (r < 0.100 && depth > 20) id = 14; // diamond
+            else if (r < 0.102 && depth > 28) id = 77; // mythril
+            else if (r < 0.103 && depth > 35) id = 79; // adamant
+          } else if (y < surface - 1) {
+            id = biome.subsurfaceBlock;
+          } else if (y === surface - 1) {
             id = biome.surfaceBlock;
+            // Океан — заливаем водой до уровня
             if (biome.id === BIOMES.OCEAN.id) {
-              id = 7;
-              for (let wy = surface; wy <= 6; wy++) if (wy < WORLD_D) this.setBlockRaw(wx, wy, wz, 16);
+              id = 7; // песок под водой
+              for (let wy = surface; wy <= biome.waterLevel; wy++) {
+                if (wy < WORLD_D) this.setBlockRaw(wx, wy, wz, 16);
+              }
             }
           }
           this.setBlockRaw(wx, y, wz, id);
         }
-        // Деревья
-        if (biome.treeChance > 0 && Math.random() < biome.treeChance && surface + 6 < WORLD_D) {
+        // Деревья — реже, с проверкой на минимальное расстояние
+        if (biome.treeChance > 0 && Math.random() < biome.treeChance && surface + 8 < WORLD_D) {
           this.placeTree(wx, surface, wz, biome.treeType);
         }
+        // Цветы и декор — реже
         if (biome.flowerChance > 0 && Math.random() < biome.flowerChance && surface < WORLD_D) {
-          if (this.getBlock(wx, surface, wz) === 0) this.setBlockRaw(wx, surface, wz, Math.random() < 0.5 ? 82 : 83);
+          if (this.getBlock(wx, surface, wz) === 0) {
+            const flowerType = Math.random() < 0.5 ? 82 : 83;
+            this.setBlockRaw(wx, surface, wz, flowerType);
+          }
         }
+        // Кактусы в пустыне
         if (biome.cactusChance > 0 && Math.random() < biome.cactusChance) {
-          for (let c = 0; c < 2+Math.floor(Math.random()*2); c++) if (surface+c < WORLD_D) this.setBlockRaw(wx, surface+c, wz, 27);
+          for (let c = 0; c < 2 + Math.floor(Math.random()*2); c++) {
+            if (surface + c < WORLD_D) this.setBlockRaw(wx, surface + c, wz, 27);
+          }
+        }
+        // Высокая трава в равнинах
+        if (biome.id === BIOMES.PLAINS.id && Math.random() < 0.08 && surface < WORLD_D) {
+          if (this.getBlock(wx, surface, wz) === 0) this.setBlockRaw(wx, surface, wz, 81);
         }
       }
     }
@@ -783,88 +861,278 @@ function makeTextureCanvas(blockId, face) {
   else if (face === 'bottom') color = b.bottom !== undefined ? b.bottom : (b.color || 0x888888);
   else if (face === 'side') color = b.side !== undefined ? b.side : (b.color || 0x888888);
   else color = b.color || 0x888888;
+
+  // Увеличим разрешение текстуры до 32x32 для более приятного вида
+  const TEX_SIZE = 32;
   const c = document.createElement('canvas');
-  c.width = 16; c.height = 16;
+  c.width = TEX_SIZE; c.height = TEX_SIZE;
   const cx = c.getContext('2d');
   const r = (color>>16)&0xff, g = (color>>8)&0xff, bl = color&0xff;
   cx.fillStyle = `rgb(${r},${g},${bl})`;
-  cx.fillRect(0, 0, 16, 16);
-  for (let i = 0; i < 50; i++) {
-    const v = (Math.random()-0.5)*30;
-    cx.fillStyle = `rgb(${Math.max(0,Math.min(255,r+v|0))},${Math.max(0,Math.min(255,g+v|0))},${Math.max(0,Math.min(255,bl+v|0))})`;
-    cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1);
+  cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+
+  // Многослойный шум для естественной текстуры
+  // Слой 1: мелкий шум (пиксели)
+  for (let i = 0; i < 200; i++) {
+    const v = (Math.random()-0.5)*25;
+    cx.fillStyle = `rgb(${clamp255(r+v)},${clamp255(g+v)},${clamp255(bl+v)})`;
+    cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
   }
+  // Слой 2: средние пятна (2x2 пикселя)
+  for (let i = 0; i < 30; i++) {
+    const v = (Math.random()-0.5)*40;
+    cx.fillStyle = `rgba(${clamp255(r+v)},${clamp255(g+v)},${clamp255(bl+v)},0.6)`;
+    const px = Math.floor(Math.random()*(TEX_SIZE-2));
+    const py = Math.floor(Math.random()*(TEX_SIZE-2));
+    cx.fillRect(px, py, 2, 2);
+  }
+
+  // Особые текстуры для конкретных блоков
   if (blockId === 1 && face === 'side') {
-    cx.fillStyle = '#7cba34'; cx.fillRect(0, 0, 16, 4);
+    // Трава: зелёный верхний край с «каплями»
+    cx.fillStyle = '#7cba34'; cx.fillRect(0, 0, TEX_SIZE, 8);
     cx.fillStyle = '#5a8a24';
-    for (let i = 0; i < 10; i++) cx.fillRect(Math.floor(Math.random()*16), 3+Math.floor(Math.random()*3), 1, 1);
+    for (let i = 0; i < 20; i++) cx.fillRect(Math.floor(Math.random()*TEX_SIZE), 6+Math.floor(Math.random()*5), 1, 1);
+    // Зелёные пятна на боку
+    for (let i = 0; i < 8; i++) {
+      cx.fillStyle = '#6aaa2a';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*6), 2, 1);
+    }
+  } else if (blockId === 1 && face === 'top') {
+    // Верх травы — более насыщенный, с пятнами
+    cx.fillStyle = '#7cba34'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    for (let i = 0; i < 40; i++) {
+      cx.fillStyle = i%2 ? '#6aaa2a' : '#8cca44';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
   } else if (blockId === 5 && face === 'side') {
-    cx.fillStyle = '#4a2f15'; for (let i = 0; i < 5; i++) cx.fillRect(i*3+1, 0, 1, 16);
+    // Кора дерева — вертикальные полосы
+    for (let i = 0; i < 8; i++) {
+      cx.fillStyle = i%2 ? '#4a2f15' : '#5a3a1a';
+      cx.fillRect(i * 4 + 1, 0, 2, TEX_SIZE);
+    }
+    // Узел
+    cx.fillStyle = '#3a2a10';
+    cx.beginPath(); cx.arc(12, 16, 3, 0, Math.PI*2); cx.fill();
   } else if (blockId === 5 && (face === 'top' || face === 'bottom')) {
-    cx.strokeStyle = '#8b5a2b'; cx.lineWidth = 1;
-    for (let rad = 2; rad < 8; rad += 2) { cx.beginPath(); cx.arc(8, 8, rad, 0, Math.PI*2); cx.stroke(); }
+    // Спил дерева — кольца
+    cx.strokeStyle = '#8b5a2b'; cx.lineWidth = 1.5;
+    for (let rad = 3; rad < 14; rad += 3) { cx.beginPath(); cx.arc(16, 16, rad, 0, Math.PI*2); cx.stroke(); }
+    cx.fillStyle = '#6b4423'; cx.beginPath(); cx.arc(16, 16, 2, 0, Math.PI*2); cx.fill();
   } else if (blockId === 4) {
-    for (let i = 0; i < 15; i++) { cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.2})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
+    // Булыжник — неровные камни
+    for (let i = 0; i < 20; i++) {
+      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.25})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
+    for (let i = 0; i < 10; i++) {
+      cx.fillStyle = `rgba(255,255,255,${0.1+Math.random()*0.2})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
+  } else if (blockId === 3) {
+    // Камень — более выраженные трещины
+    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      cx.beginPath();
+      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.stroke();
+    }
   } else if (blockId === 9) {
-    cx.strokeStyle = 'rgba(255,255,255,0.7)'; cx.lineWidth = 1; cx.strokeRect(0.5, 0.5, 15, 15);
+    // Стекло — чистая текстура с лёгким оттенком
+    cx.fillStyle = 'rgba(168,216,232,0.3)'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.strokeStyle = 'rgba(255,255,255,0.8)'; cx.lineWidth = 1.5;
+    cx.strokeRect(1, 1, TEX_SIZE-2, TEX_SIZE-2);
+    // Блик
+    cx.fillStyle = 'rgba(255,255,255,0.4)';
+    cx.fillRect(3, 3, 8, 2);
+    cx.fillRect(3, 3, 2, 8);
   } else if (blockId === 14) {
-    for (let i = 0; i < 10; i++) { cx.fillStyle = '#fff'; cx.fillRect(Math.floor(Math.random()*14)+1, Math.floor(Math.random()*14)+1, 1, 1); }
+    // Алмаз — блёстки
+    for (let i = 0; i < 20; i++) {
+      cx.fillStyle = '#fff';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
+    for (let i = 0; i < 8; i++) {
+      cx.fillStyle = '#aef5e8';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
   } else if (blockId === 12 || blockId === 13 || blockId === 11) {
-    const sc = blockId === 13 ? '#ffe85e' : blockId === 12 ? '#e8c898' : '#000';
-    for (let i = 0; i < 8; i++) { cx.fillStyle = sc; cx.fillRect(Math.floor(Math.random()*12)+2, Math.floor(Math.random()*12)+2, 2, 2); }
+    // Руда: вкрапления
+    const spotColor = blockId === 13 ? '#ffe85e' : blockId === 12 ? '#e8c898' : '#1a1a1a';
+    for (let i = 0; i < 12; i++) {
+      cx.fillStyle = spotColor;
+      const sx = Math.floor(Math.random()*(TEX_SIZE-4)) + 2;
+      const sy = Math.floor(Math.random()*(TEX_SIZE-4)) + 2;
+      cx.fillRect(sx, sy, 3, 3);
+      // Блик
+      cx.fillStyle = 'rgba(255,255,255,0.5)';
+      cx.fillRect(sx, sy, 1, 1);
+    }
   } else if (blockId === 10) {
-    cx.fillStyle = '#5a2818'; cx.fillRect(0, 7, 16, 1); cx.fillRect(0, 15, 16, 1);
-    cx.fillRect(7, 0, 1, 8); cx.fillRect(3, 8, 1, 8); cx.fillRect(11, 8, 1, 8);
+    // Кирпич — правильная кладка
+    cx.fillStyle = '#5a2818';
+    cx.fillRect(0, 14, TEX_SIZE, 2); cx.fillRect(0, 30, TEX_SIZE, 2);
+    cx.fillRect(14, 0, 2, 16); cx.fillRect(6, 16, 2, 14); cx.fillRect(22, 16, 2, 14);
   } else if (blockId === 6 || blockId === 22 || blockId === 37) {
-    for (let i = 0; i < 25; i++) { cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.25})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1); }
-    for (let i = 0; i < 10; i++) { cx.fillStyle = '#6aaa3a'; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1); }
+    // Листва — плотная, с просветами
+    for (let i = 0; i < 60; i++) {
+      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.25})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
+    for (let i = 0; i < 25; i++) {
+      cx.fillStyle = blockId === 22 ? '#3a7a2a' : '#6aaa3a';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
   } else if (blockId === 8) {
-    cx.fillStyle = 'rgba(0,0,0,0.25)'; cx.fillRect(0, 7, 16, 1); cx.fillRect(0, 15, 16, 1);
+    // Доски — горизонтальные линии
+    cx.fillStyle = 'rgba(0,0,0,0.3)';
+    cx.fillRect(0, 15, TEX_SIZE, 1); cx.fillRect(0, 31, TEX_SIZE, 1);
+    cx.fillStyle = '#a87a3a'; cx.fillRect(0, 0, TEX_SIZE, 1); cx.fillRect(0, 16, TEX_SIZE, 1);
+    // Текстура дерева
+    for (let i = 0; i < 15; i++) {
+      cx.fillStyle = 'rgba(139,90,43,0.4)';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
+    }
   } else if (blockId === 15) {
-    for (let i = 0; i < 20; i++) { cx.fillStyle = `rgba(0,0,0,${0.2+Math.random()*0.4})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
+    // Bedrock — хаотичные тёмные пятна
+    for (let i = 0; i < 40; i++) {
+      cx.fillStyle = `rgba(0,0,0,${0.2+Math.random()*0.4})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
+    for (let i = 0; i < 15; i++) {
+      cx.fillStyle = '#555';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
   } else if (blockId === 17) {
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, 16, 16);
-    cx.strokeStyle = '#3a2a08'; cx.lineWidth = 1;
-    cx.strokeRect(0.5, 0.5, 7, 7); cx.strokeRect(8.5, 0.5, 7, 7);
-    cx.strokeRect(0.5, 8.5, 7, 7); cx.strokeRect(8.5, 8.5, 7, 7);
-    if (face === 'side') { cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, 16, 4); }
+    // Крафтовый стол — тёмная деревянная столешница с сеткой
+    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.strokeStyle = '#3a2a08'; cx.lineWidth = 1.5;
+    cx.strokeRect(1, 1, 14, 14); cx.strokeRect(17, 1, 14, 14);
+    cx.strokeRect(1, 17, 14, 14); cx.strokeRect(17, 17, 14, 14);
+    if (face === 'side') { cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, TEX_SIZE, 8); }
   } else if (blockId === 18) {
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, 16, 16);
-    cx.fillStyle = '#a8782a'; cx.fillRect(1, 2, 14, 12);
-    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 7, 16, 2); cx.fillRect(7, 2, 2, 12);
-    cx.fillStyle = '#ffd700'; cx.fillRect(7, 7, 2, 2);
+    // Сундук — деревянный с металлическими уголками
+    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.fillStyle = '#a8782a'; cx.fillRect(2, 3, 28, 26);
+    cx.fillStyle = '#5a3a18'; cx.fillRect(0, 14, TEX_SIZE, 3); cx.fillRect(14, 3, 4, 26);
+    cx.fillStyle = '#ffd700'; cx.fillRect(14, 14, 4, 4); // замок
   } else if (blockId === 20) {
-    for (let i = 0; i < 15; i++) { cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.2})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
-    for (let i = 0; i < 8; i++) { cx.fillStyle = '#5a7a3a'; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
+    // Мшистый камень
+    for (let i = 0; i < 30; i++) {
+      cx.fillStyle = `rgba(0,0,0,${0.15+Math.random()*0.2})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
+    for (let i = 0; i < 20; i++) {
+      cx.fillStyle = '#5a7a3a';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
   } else if (blockId === 16) {
-    for (let i = 0; i < 30; i++) { cx.fillStyle = `rgba(255,255,255,${0.05+Math.random()*0.15})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1); }
+    // Вода — волны
+    for (let i = 0; i < 60; i++) {
+      cx.fillStyle = `rgba(255,255,255,${0.05+Math.random()*0.15})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
+    }
   } else if (blockId === 25 || blockId === 49) {
-    for (let i = 0; i < 20; i++) { cx.fillStyle = `rgba(200,220,255,${0.3+Math.random()*0.3})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1); }
+    // Снег — ровный белый с лёгкими кристаллами
+    for (let i = 0; i < 40; i++) {
+      cx.fillStyle = `rgba(200,220,255,${0.3+Math.random()*0.3})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
+    for (let i = 0; i < 15; i++) {
+      cx.fillStyle = '#fff';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
   } else if (blockId === 27) {
-    cx.fillStyle = '#2a6a2a'; cx.fillRect(0, 0, 16, 16);
-    cx.fillStyle = '#3a8a3a'; cx.fillRect(2, 0, 12, 16);
-    cx.fillStyle = '#5aaa5a'; cx.fillRect(4, 0, 2, 16); cx.fillRect(10, 0, 2, 16);
-  } else if (blockId === 31 || blockId === 30) {
-    for (let i = 0; i < 12; i++) { cx.fillStyle = `rgba(255,255,255,${0.2+Math.random()*0.3})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 1, 1); }
+    // Кактус — зелёный с шипами
+    cx.fillStyle = '#2a6a2a'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.fillStyle = '#3a8a3a'; cx.fillRect(4, 0, 24, TEX_SIZE);
+    cx.fillStyle = '#5aaa5a'; cx.fillRect(8, 0, 4, TEX_SIZE); cx.fillRect(20, 0, 4, TEX_SIZE);
+    // Шипы
+    for (let i = 0; i < 12; i++) {
+      cx.fillStyle = '#fff';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
+  } else if (blockId === 31 || blockId === 32) {
+    // Железный/золотой блок — металлический блеск
+    for (let i = 0; i < 25; i++) {
+      cx.fillStyle = `rgba(255,255,255,${0.2+Math.random()*0.3})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
+    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
+    cx.strokeRect(1, 1, TEX_SIZE-2, TEX_SIZE-2);
   } else if (blockId === 34) {
-    for (let i = 0; i < 15; i++) { cx.fillStyle = `rgba(80,30,80,${0.3+Math.random()*0.3})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
+    // Обсидиан — тёмный с фиолетовыми прожилками
+    for (let i = 0; i < 25; i++) {
+      cx.fillStyle = `rgba(80,30,80,${0.3+Math.random()*0.3})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
+    cx.strokeStyle = 'rgba(150,80,150,0.5)'; cx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      cx.beginPath();
+      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.stroke();
+    }
   } else if (blockId === 51) {
-    cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, 16, 16);
-    cx.fillStyle = '#6b4423'; cx.fillRect(0, 12, 16, 4);
+    // Стол — деревянная столешница
+    cx.fillStyle = '#8b5a2b'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.fillStyle = '#6b4423'; cx.fillRect(0, 24, TEX_SIZE, 8);
+    cx.strokeStyle = 'rgba(0,0,0,0.3)'; cx.lineWidth = 1;
+    cx.strokeRect(0, 0, TEX_SIZE, TEX_SIZE);
   } else if (blockId === 56) {
-    cx.fillStyle = '#777'; cx.fillRect(0, 0, 16, 16);
-    cx.fillStyle = '#555'; cx.fillRect(2, 2, 5, 5); cx.fillRect(9, 9, 5, 5);
-    cx.fillStyle = '#ff8a2a'; cx.fillRect(6, 6, 4, 4);
+    // Печь — каменная с огнём
+    cx.fillStyle = '#777'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.fillStyle = '#555'; cx.fillRect(4, 4, 24, 24);
+    cx.fillStyle = '#ff8a2a'; cx.fillRect(10, 12, 12, 12);
+    cx.fillStyle = '#ffe85e'; cx.fillRect(13, 15, 6, 6);
   } else if (blockId === 71) {
-    cx.fillStyle = '#4a1a5a'; cx.fillRect(0, 0, 16, 16);
-    cx.fillStyle = '#6a2a8a'; cx.fillRect(2, 2, 12, 12);
-    cx.fillStyle = '#fff'; for (let i = 0; i < 5; i++) cx.fillRect(Math.floor(Math.random()*12)+2, Math.floor(Math.random()*12)+2, 1, 1);
+    // Магический стол — фиолетовый с символами
+    cx.fillStyle = '#4a1a5a'; cx.fillRect(0, 0, TEX_SIZE, TEX_SIZE);
+    cx.fillStyle = '#6a2a8a'; cx.fillRect(4, 4, 24, 24);
+    cx.fillStyle = '#fff';
+    for (let i = 0; i < 8; i++) cx.fillRect(Math.floor(Math.random()*24)+4, Math.floor(Math.random()*24)+4, 1, 1);
   } else if (blockId === 72) {
-    for (let i = 0; i < 15; i++) { cx.fillStyle = `rgba(255,217,94,${0.4+Math.random()*0.4})`; cx.fillRect(Math.floor(Math.random()*16), Math.floor(Math.random()*16), 2, 2); }
+    // Glowstone — светящийся
+    for (let i = 0; i < 30; i++) {
+      cx.fillStyle = `rgba(255,217,94,${0.4+Math.random()*0.4})`;
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 3, 3);
+    }
+    for (let i = 0; i < 15; i++) {
+      cx.fillStyle = '#fff';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
   } else if (blockId === 77 || blockId === 78) {
-    for (let i = 0; i < 10; i++) { cx.fillStyle = '#fff'; cx.fillRect(Math.floor(Math.random()*14)+1, Math.floor(Math.random()*14)+1, 1, 1); }
+    // Мифрил/адамант — кристаллический блеск
+    for (let i = 0; i < 20; i++) {
+      cx.fillStyle = '#fff';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 1, 1);
+    }
+    cx.strokeStyle = 'rgba(255,255,255,0.5)'; cx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      cx.beginPath();
+      cx.moveTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.lineTo(Math.random()*TEX_SIZE, Math.random()*TEX_SIZE);
+      cx.stroke();
+    }
+  } else if (blockId === 7) {
+    // Песок — более приятный, с лёгкой рябью
+    for (let i = 0; i < 15; i++) {
+      cx.fillStyle = 'rgba(180,150,100,0.3)';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 1);
+    }
+  } else if (blockId === 2) {
+    // Земля — с камнями
+    for (let i = 0; i < 12; i++) {
+      cx.fillStyle = 'rgba(60,40,20,0.5)';
+      cx.fillRect(Math.floor(Math.random()*TEX_SIZE), Math.floor(Math.random()*TEX_SIZE), 2, 2);
+    }
   }
   return c;
+}
+
+function clamp255(v) {
+  return Math.max(0, Math.min(255, Math.floor(v)));
 }
 
 function makeMaterial(blockId, face) {
@@ -1110,6 +1378,8 @@ addEventListener('wheel', e => {
 }, { passive: true });
 
 document.getElementById('playBtn').addEventListener('click', () => {
+  initAudio();
+  if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
   paused = false;
   document.getElementById('blocker').style.display = 'none';
   renderer.domElement.requestPointerLock();
@@ -1186,7 +1456,7 @@ function updatePlayer(dt) {
       }
       player.vel.y = 0;
     }
-    if (keys['Space'] && player.onGround) { player.vel.y = JUMP_V; player.onGround = false; }
+    if (keys['Space'] && player.onGround) { player.vel.y = JUMP_V; player.onGround = false; soundJump(); }
   }
   if (player.pos.y < 0) { player.pos.y = 1; player.vel.y = 0; }
   player.pos.x = Math.max(0.5, Math.min(WORLD_W-0.5, player.pos.x));
@@ -1240,12 +1510,14 @@ function mineBlock() {
   if (drop !== 0 && drop !== undefined) {
     addItemToInventory(drop, 1);
     flashHint('+1 ' + (typeof drop === 'string' ? ITEMS[drop].name : BLOCKS[drop].name));
+    soundDig();
   }
   if (target.blockId === 18) {
     const idx = world.structures.findIndex(s => s.type === 'chest' && s.x === target.x && s.y === target.y && s.z === target.z);
     if (idx >= 0 && world.structures[idx].loot) {
       world.structures[idx].loot.forEach(l => addItemToInventory(l.item, l.count));
       flashHint('📦 Сундук: +' + world.structures[idx].loot.length + ' предметов');
+      soundChest();
     }
   }
   world.setBlock(target.x, target.y, target.z, 0);
@@ -1286,6 +1558,7 @@ function placeBlock() {
   if (sel.count <= 0) player.hotbar[player.selectedSlot] = {block:0, item:null, count:0};
   buildWorldMesh();
   updateHotbar();
+  soundPlace();
 }
 
 function getBlockSafe(x, y, z) {
@@ -1555,6 +1828,7 @@ function damagePlayer(dmg) {
   const realDmg = Math.max(1, dmg - Math.floor(def / 2));
   player.health = Math.max(0, player.health - realDmg);
   flashHint('💔 -' + realDmg + ' HP');
+  soundDamage();
   if (player.health === 0) {
     flashHint('💀 Ты погиб! Респаун...');
     setTimeout(() => {
@@ -1710,6 +1984,7 @@ function onInvSlotClick(idx, shift) {
         slot.count--;
         if (slot.count <= 0) player.inventory[idx] = {block:0, item:null, count:0};
         flashHint('Съедено: +' + it.heal);
+        soundPickup();
         renderInventory();
         return;
       }
@@ -1814,6 +2089,7 @@ function doCraft(recipe) {
   }
   addItemToInventory(recipe.result, recipe.count);
   flashHint('✓ Скрафчено: ' + (typeof recipe.result === 'string' ? ITEMS[recipe.result].name : BLOCKS[recipe.result].name) + ' x' + recipe.count);
+  soundCraft();
   renderInventory(); updateHotbar();
 }
 
@@ -2111,6 +2387,7 @@ function attackMob() {
   closestMob.hp -= dmg;
   closestMob.hitFlash = 0.2;
   flashHint('⚔ ' + closestMob.def.name + ' -' + dmg + ' HP (' + Math.max(0,closestMob.hp) + '/' + closestMob.maxHp + ')');
+  soundHit();
   const pushDir = new THREE.Vector3().subVectors(closestMob.pos, player.pos).setY(0).normalize();
   closestMob.pos.add(pushDir.multiplyScalar(0.8));
   closestMob.vel.y = 4;
@@ -2122,7 +2399,12 @@ function attackMob() {
         flashHint('+ ' + n + 'x ' + (ITEMS[d.item] ? ITEMS[d.item].name : d.item));
       }
     }
-    if (closestMob.def.boss) flashHint('🏆 БОСС ПОВЕРЖЕН: ' + closestMob.def.name + '!');
+    if (closestMob.def.boss) {
+      flashHint('🏆 БОСС ПОВЕРЖЕН: ' + closestMob.def.name + '!');
+      soundBossKill();
+    } else {
+      soundMobDeath();
+    }
     scene.remove(closestMob.mesh);
     mobs.splice(mobs.indexOf(closestMob), 1);
   }
@@ -2309,6 +2591,7 @@ function loop(now) {
       }
       meshRebuildTimer = 0;
     }
+    maybePlayAmbient(now);
   }
   renderer.render(scene, camera);
   requestAnimationFrame(loop);
@@ -2319,6 +2602,129 @@ let lastPCX = -1, lastPCZ = -1;
 // ═══════════════════════════════════════════════════════════
 //  СТАРТ
 // ═══════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════
+//  ЗВУКОВАЯ СИСТЕМА (Web Audio API — процедурная генерация)
+// ═══════════════════════════════════════════════════════════
+let audioCtx = null;
+let masterGain = null;
+const soundsEnabled = true;
+
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.3;
+    masterGain.connect(audioCtx.destination);
+  } catch(e) { console.log('Audio not available:', e.message); }
+}
+
+// Простой звук-тон с огибающей
+function playTone(freq, duration, type = 'sine', volume = 1) {
+  if (!audioCtx || !soundsEnabled) return;
+  try {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(volume * 0.3, audioCtx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(masterGain);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+  } catch(e) {}
+}
+
+// Шум (для копания, шагов)
+function playNoise(duration, volume = 0.5, filterFreq = 1000) {
+  if (!audioCtx || !soundsEnabled) return;
+  try {
+    const bufferSize = audioCtx.sampleRate * duration;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.5;
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = filterFreq;
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(volume * 0.3, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    source.connect(filter); filter.connect(gain); gain.connect(masterGain);
+    source.start();
+    source.stop(audioCtx.currentTime + duration);
+  } catch(e) {}
+}
+
+// Звук копания блока
+function soundDig() {
+  playNoise(0.15, 0.4, 800);
+  playTone(150 + Math.random()*50, 0.1, 'square', 0.3);
+}
+// Звук установки блока
+function soundPlace() {
+  playTone(200, 0.08, 'square', 0.4);
+  playNoise(0.1, 0.3, 1500);
+}
+// Звук прыжка
+function soundJump() {
+  playTone(400, 0.1, 'sine', 0.4);
+  playTone(600, 0.05, 'sine', 0.3);
+}
+// Звук удара по мобу
+function soundHit() {
+  playNoise(0.08, 0.5, 2000);
+  playTone(120, 0.1, 'sawtooth', 0.4);
+}
+// Звук получения урона
+function soundDamage() {
+  playTone(200, 0.2, 'sawtooth', 0.5);
+  playTone(150, 0.3, 'sawtooth', 0.4);
+}
+// Звук смерти моба
+function soundMobDeath() {
+  playTone(300, 0.15, 'sawtooth', 0.4);
+  setTimeout(() => playTone(150, 0.3, 'sawtooth', 0.3), 100);
+}
+// Звук крафта
+function soundCraft() {
+  playTone(523, 0.08, 'sine', 0.3); // C5
+  setTimeout(() => playTone(659, 0.08, 'sine', 0.3), 80); // E5
+  setTimeout(() => playTone(784, 0.15, 'sine', 0.3), 160); // G5
+}
+// Звук подбора предмета
+function soundPickup() {
+  playTone(800, 0.05, 'sine', 0.3);
+  setTimeout(() => playTone(1200, 0.08, 'sine', 0.3), 50);
+}
+// Звук открытия сундука
+function soundChest() {
+  playTone(440, 0.1, 'sine', 0.3);
+  setTimeout(() => playTone(554, 0.1, 'sine', 0.3), 80);
+  setTimeout(() => playTone(659, 0.2, 'sine', 0.3), 160);
+}
+// Звук победы над боссом
+function soundBossKill() {
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((f, i) => setTimeout(() => playTone(f, 0.3, 'triangle', 0.4), i * 120));
+}
+// Звук открытия инвентаря
+function soundInventory() {
+  playTone(600, 0.05, 'sine', 0.2);
+}
+// Ambient-звук (фоновый ветер) — периодически
+let lastAmbient = 0;
+function maybePlayAmbient(now) {
+  if (!audioCtx || !soundsEnabled) return;
+  if (now - lastAmbient > 8000 + Math.random() * 5000) {
+    lastAmbient = now;
+    playNoise(1.5, 0.08, 400);
+  }
+}
+
 function start() {
   const loadingEl = document.getElementById('loading');
   if (loadingEl) loadingEl.textContent = 'Генерация чанков...';
